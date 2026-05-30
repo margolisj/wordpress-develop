@@ -186,4 +186,20 @@ class Tests_Blocks_wpBlockParser extends WP_UnitTestCase {
 
 		$this->assertNull( $blocks[0]['attrs'] );
 	}
+
+	/**
+	 * A non-array $options is tolerated: it is treated as no options (default
+	 * behavior) rather than causing an offset access error.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse
+	 */
+	public function test_parse_tolerates_non_array_options() {
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse( '<!-- wp:test {"object":{}} /-->', 'not-an-array' );
+
+		// Falls back to default behavior: the empty object decodes to an empty array.
+		$this->assertSame( array(), $blocks[0]['attrs']['object'] );
+	}
 }

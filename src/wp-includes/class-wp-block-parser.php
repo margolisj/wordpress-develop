@@ -88,10 +88,11 @@ class WP_Block_Parser {
 	 */
 	public function parse( $document, $options = array() ) {
 		$this->document = $document;
-		$this->options  = $options;
-		$this->offset   = 0;
-		$this->output   = array();
-		$this->stack    = array();
+		// A non-array $options is tolerated and treated as no options (default behavior).
+		$this->options = is_array( $options ) ? $options : array();
+		$this->offset  = 0;
+		$this->output  = array();
+		$this->stack   = array();
 
 		while ( $this->proceed() ) {
 			continue;

@@ -179,6 +179,23 @@ class Tests_Blocks_Serialize extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The attribute root is intentionally never tagged, so a block whose entire
+	 * attribute set is an empty object is still serialized without attributes,
+	 * even when object preservation is enabled. This locks in that scoping (the
+	 * fix targets nested empty objects, not a top-level empty-object attr set).
+	 *
+	 * @ticket 63325
+	 */
+	public function test_serialize_drops_top_level_empty_object_even_with_option() {
+		$blocks = parse_blocks(
+			'<!-- wp:test {} /-->',
+			array( 'preserve_empty_object_attributes' => true )
+		);
+
+		$this->assertSame( '<!-- wp:test /-->', serialize_blocks( $blocks ) );
+	}
+
+	/**
 	 * The KSES block-filtering path (filter_block_content) opts in to
 	 * object-preserving parsing, so empty object attributes must survive it,
 	 * and the internal marker must never leak into the sanitized output.
