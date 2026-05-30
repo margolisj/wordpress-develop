@@ -1238,7 +1238,10 @@ function apply_block_hooks_to_content( $content, $context = null, $callback = 'i
 	};
 	add_filter( 'hooked_block_types', $suppress_single_instance_blocks, PHP_INT_MAX );
 	$content = traverse_and_serialize_blocks(
-		parse_blocks( $content ),
+		parse_blocks(
+			$content,
+			array( 'preserve_empty_object_attributes' => true )
+		),
 		$before_block_visitor,
 		$after_block_visitor
 	);
@@ -1703,6 +1706,7 @@ function make_after_block_visitor( $hooked_blocks, $context, $callback = 'insert
  * @return string Serialized attributes.
  */
 function serialize_block_attributes( $block_attributes ) {
+	$block_attributes   = wp_restore_block_attribute_object_types( $block_attributes );
 	$encoded_attributes = wp_json_encode( $block_attributes, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 
 	return strtr(
@@ -2125,7 +2129,10 @@ function filter_block_content( $text, $allowed_html = 'post', $allowed_protocols
 		$text = preg_replace_callback( '%<!--(.*?)--->%', '_filter_block_content_callback', $text );
 	}
 
-	$blocks = parse_blocks( $text );
+	$blocks = parse_blocks(
+		$text,
+		array( 'preserve_empty_object_attributes' => true )
+	);
 	foreach ( $blocks as $block ) {
 		$block   = filter_block_kses( $block, $allowed_html, $allowed_protocols );
 		$result .= serialize_block( $block );
@@ -2547,7 +2554,7 @@ function render_block( $parsed_block ) {
  *     }
  * }
  */
-function parse_blocks( $content ) {
+function parse_blocks( $content, $options = array() ) {
 	/**
 	 * Filter to allow plugins to replace the server-side block parser.
 	 *
@@ -2558,7 +2565,35 @@ function parse_blocks( $content ) {
 	$parser_class = apply_filters( 'block_parser_class', 'WP_Block_Parser' );
 
 	$parser = new $parser_class();
-	return $parser->parse( $content );
+	return $parser->parse( $content, $options );
+}
+
+/**
+ * Restores object-typed block attributes tagged during object-preserving
+ * parsing (see WP_Block_Parser::preserve_object_types()). Recursively strips
+ * WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER and re-casts any tagged array back
+ * to an object, so wp_json_encode() emits `{}`/`{...}` for objects and
+ * `[]`/`[...]` for arrays. On attributes parsed the default way (no marker)
+ * this is a no-op, so the render path is byte-for-byte unchanged.
+ *
+ * @since 6.10.0
+ *
+ * @param mixed $value A parsed attribute value.
+ * @return mixed The value with object types restored.
+ */
+function wp_restore_block_attribute_object_types( $value ) {
+	if ( ! is_array( $value ) ) {
+		return $value;
+	}
+
+	$is_object = array_key_exists( WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER, $value );
+	unset( $value[ WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER ] );
+
+	foreach ( $value as $key => $child ) {
+		$value[ $key ] = wp_restore_block_attribute_object_types( $child );
+	}
+
+	return $is_object ? (object) $value : $value;
 }
 
 /**

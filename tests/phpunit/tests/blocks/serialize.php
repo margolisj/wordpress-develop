@@ -11,6 +11,45 @@
  */
 class Tests_Blocks_Serialize extends WP_UnitTestCase {
 	/**
+	 * Empty `{}` object attributes (including nested ones) must survive a
+	 * parse -> serialize round-trip when the parser is asked to preserve them,
+	 * while empty `[]` array attributes must stay arrays.
+	 *
+	 * @ticket 63325
+	 *
+	 * @dataProvider data_serialize_identity_with_preserved_object_types
+	 *
+	 * @param string $original Original block markup.
+	 */
+	public function test_serialize_identity_with_preserved_object_types( $original ) {
+		$blocks     = parse_blocks( $original, array( 'preserve_empty_object_attributes' => true ) );
+		$serialized = serialize_blocks( $blocks );
+		$this->assertSame( $original, $serialized );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public function data_serialize_identity_with_preserved_object_types() {
+		return array(
+			// Empty object attribute value stays an object.
+			array( '<!-- wp:test {"object":{}} /-->' ),
+			// Empty array attribute value stays an array.
+			array( '<!-- wp:test {"array":[]} /-->' ),
+			// Empty object nested inside an object (the reported case shape).
+			array( '<!-- wp:test {"nested":{"a":{},"b":[]}} /-->' ),
+			// The exact attributes from the bug report.
+			array( '<!-- wp:test {"blockId":"block-RX3iloq4aK","bgColor":{"desktop":{"type":"solid","solidValue":"#2c80af","gradientValue":""},"tablet":{},"mobile":{},"hover":{}}} /-->' ),
+			// Array containing empty objects.
+			array( '<!-- wp:test {"list":[{},{}]} /-->' ),
+			// Object with numeric string keys stays an object.
+			array( '<!-- wp:test {"map":{"0":"x","1":"y"}} /-->' ),
+		);
+	}
+
+	/**
 	 * Ensure there are no issues with special character encoding.
 	 *
 	 * @ticket 63917

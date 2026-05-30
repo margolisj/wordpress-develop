@@ -15,6 +15,28 @@
  */
 class WP_Block_Parser {
 	/**
+	 * Hidden marker key appended to every associative array that originated
+	 * from a JSON *object*. It lets serialize_block_attributes() re-cast the
+	 * array back to an object, preserving the `{}` vs `[]` distinction that
+	 * PHP otherwise loses for empty (and numeric-keyed) values.
+	 *
+	 * Only added when the `preserve_empty_object_attributes` parse option is
+	 * set; the default parse path is unaffected.
+	 *
+	 * @since 6.10.0
+	 * @var string
+	 */
+	const OBJECT_ATTRIBUTE_MARKER = '__wpBlockAttributeIsObject';
+
+	/**
+	 * Options supplied to the most recent parse() call.
+	 *
+	 * @since 6.10.0
+	 * @var array
+	 */
+	public $options = array();
+
+	/**
 	 * Input document being parsed
 	 *
 	 * @example "Pre-text\n<!-- wp:paragraph -->This is inside a block!<!-- /wp:paragraph -->"
@@ -60,8 +82,9 @@ class WP_Block_Parser {
 	 * @param string $document Input document being parsed.
 	 * @return array[]
 	 */
-	public function parse( $document ) {
+	public function parse( $document, $options = array() ) {
 		$this->document = $document;
+		$this->options  = $options;
 		$this->offset   = 0;
 		$this->output   = array();
 		$this->stack    = array();
@@ -277,7 +300,7 @@ class WP_Block_Parser {
 		 * are associative arrays. If we use `array()` we get a JSON `[]`
 		 */
 		$attrs = $has_attrs
-			? json_decode( $matches['attrs'][0], /* as-associative */ true )
+			? $this->parse_block_attributes( $matches['attrs'][0] )
 			: array();
 
 		/*
@@ -386,6 +409,70 @@ class WP_Block_Parser {
 		}
 
 		$this->output[] = (array) $stack_top->block;
+	}
+
+	/**
+	 * Decodes a block's attribute JSON, optionally preserving the
+	 * array-vs-object distinction that plain json_decode(..., true) erases.
+	 *
+	 * @since 6.10.0
+	 *
+	 * @param string $json Raw attribute JSON from the block delimiter.
+	 * @return array|null Decoded attributes, or null on invalid JSON.
+	 */
+	private function parse_block_attributes( $json ) {
+		if ( empty( $this->options['preserve_empty_object_attributes'] ) ) {
+			// Default (historical) behavior: objects and arrays both decode to arrays.
+			return json_decode( $json, /* associative */ true );
+		}
+
+		/*
+		 * Object-preserving decode. Each nested object is tagged so that
+		 * serialize_block_attributes() can restore it to an object. The
+		 * top-level attribute container is intentionally NOT tagged, so empty
+		 * top-level attributes keep being dropped on serialization, as before.
+		 */
+		$decoded = json_decode( $json, /* associative */ false );
+		if ( null === $decoded ) {
+			return null;
+		}
+
+		return self::preserve_object_types( $decoded, true );
+	}
+
+	/**
+	 * Recursively converts a json_decode(..., false) result into arrays,
+	 * tagging every value that came from a JSON object with
+	 * self::OBJECT_ATTRIBUTE_MARKER so the type can be restored on serialize.
+	 *
+	 * @since 6.10.0
+	 *
+	 * @param mixed $data              Decoded value (stdClass, array, or scalar).
+	 * @param bool  $is_attribute_root Whether $data is the top-level attribute
+	 *                                 container (which is never tagged).
+	 * @return mixed Array (tagged when from an object) or scalar.
+	 */
+	private static function preserve_object_types( $data, $is_attribute_root = false ) {
+		if ( $data instanceof stdClass ) {
+			$array = array();
+			foreach ( get_object_vars( $data ) as $key => $value ) {
+				$array[ $key ] = self::preserve_object_types( $value );
+			}
+			if ( ! $is_attribute_root ) {
+				$array[ self::OBJECT_ATTRIBUTE_MARKER ] = true;
+			}
+			return $array;
+		}
+
+		if ( is_array( $data ) ) {
+			$array = array();
+			foreach ( $data as $key => $value ) {
+				$array[ $key ] = self::preserve_object_types( $value );
+			}
+			return $array; // No marker: a JSON array stays an array.
+		}
+
+		return $data; // Scalars and null pass through unchanged.
 	}
 }
 
