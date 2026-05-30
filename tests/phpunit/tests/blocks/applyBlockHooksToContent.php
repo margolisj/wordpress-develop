@@ -94,6 +94,33 @@ class Tests_Blocks_ApplyBlockHooksToContent extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The Block Hooks path parses with object-preserving attributes enabled, so an
+	 * anchor block's empty object attribute must survive the parse -> traverse ->
+	 * serialize round-trip (rather than collapsing to `[]`), even while a hooked
+	 * block callback runs over the marked attributes. The internal object marker
+	 * must never leak into the serialized output.
+	 *
+	 * @ticket 63325
+	 */
+	public function test_apply_block_hooks_to_content_preserves_empty_object_attributes() {
+		$context          = new WP_Block_Template();
+		$context->content = '<!-- wp:post-content {"layout":{"type":"flex","columns":{}}} /-->';
+
+		$actual = apply_block_hooks_to_content( $context->content, $context, 'insert_hooked_blocks' );
+
+		$this->assertSame(
+			'<!-- wp:post-content {"layout":{"type":"flex","columns":{}}} /--><!-- wp:tests/hooked-block /-->',
+			$actual,
+			'Empty object attribute should survive the Block Hooks round-trip and the hooked block should be inserted.'
+		);
+		$this->assertStringNotContainsString(
+			WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER,
+			$actual,
+			'The internal object marker must never leak into serialized output.'
+		);
+	}
+
+	/**
 	 * @ticket 61074
 	 * @ticket 63287
 	 */

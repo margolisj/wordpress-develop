@@ -78,8 +78,12 @@ class WP_Block_Parser {
 	 * return an error on invalid inputs.
 	 *
 	 * @since 5.0.0
+	 * @since 6.10.0 Added the `$options` parameter.
 	 *
 	 * @param string $document Input document being parsed.
+	 * @param array  $options  Optional. Parse options. Supports the `preserve_empty_object_attributes`
+	 *                         key; see {@see parse_blocks()} for its meaning and the contract for
+	 *                         consuming the resulting attributes. Default empty array.
 	 * @return array[]
 	 */
 	public function parse( $document, $options = array() ) {

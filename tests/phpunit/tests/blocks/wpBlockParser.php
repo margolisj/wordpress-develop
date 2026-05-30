@@ -114,4 +114,76 @@ class Tests_Blocks_wpBlockParser extends WP_UnitTestCase {
 	protected function strip_r( $input ) {
 		return str_replace( "\r", '', $input );
 	}
+
+	/**
+	 * By default (no options), JSON objects and arrays both decode to plain
+	 * arrays and no object marker is added. This is the historical behavior.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse
+	 */
+	public function test_parse_does_not_tag_object_types_by_default() {
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse( '<!-- wp:test {"object":{},"array":[]} /-->' );
+
+		$attrs = $blocks[0]['attrs'];
+
+		$this->assertSame( array(), $attrs['object'], 'Empty object should decode to an empty array by default.' );
+		$this->assertSame( array(), $attrs['array'], 'Empty array should decode to an empty array.' );
+		$this->assertStringNotContainsString(
+			WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER,
+			wp_json_encode( $blocks ),
+			'No object marker should be present on the default parse path.'
+		);
+	}
+
+	/**
+	 * With the `preserve_empty_object_attributes` option, values that came from
+	 * a JSON object are tagged with the object marker, values from a JSON array
+	 * are not, and the top-level attribute container itself is never tagged.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse
+	 */
+	public function test_parse_tags_object_types_when_option_is_set() {
+		$marker = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse(
+			'<!-- wp:test {"object":{"x":1},"array":[1,2]} /-->',
+			array( 'preserve_empty_object_attributes' => true )
+		);
+
+		$attrs = $blocks[0]['attrs'];
+
+		// The top-level attribute container is intentionally not tagged.
+		$this->assertArrayNotHasKey( $marker, $attrs, 'The attribute root must not be tagged.' );
+
+		// A value from a JSON object is tagged.
+		$this->assertArrayHasKey( $marker, $attrs['object'], 'Object-typed value must be tagged.' );
+		$this->assertSame( 1, $attrs['object']['x'], 'Object data must be preserved alongside the marker.' );
+
+		// A value from a JSON array is not tagged and keeps list shape.
+		$this->assertArrayNotHasKey( $marker, $attrs['array'], 'Array-typed value must not be tagged.' );
+		$this->assertSame( array( 1, 2 ), $attrs['array'], 'Array data must be preserved.' );
+	}
+
+	/**
+	 * Invalid attribute JSON yields null attributes on the object-preserving
+	 * path, matching the default json_decode() behavior.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse
+	 */
+	public function test_parse_with_option_returns_null_for_invalid_attribute_json() {
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse(
+			'<!-- wp:test {"invalid} /-->',
+			array( 'preserve_empty_object_attributes' => true )
+		);
+
+		$this->assertNull( $blocks[0]['attrs'] );
+	}
 }

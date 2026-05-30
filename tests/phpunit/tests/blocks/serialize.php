@@ -50,6 +50,130 @@ class Tests_Blocks_Serialize extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Without the opt-in option, the historical behavior must be preserved:
+	 * an empty object attribute collapses to an empty array on serialization.
+	 * This guards against the change leaking into the default parse path.
+	 *
+	 * @ticket 63325
+	 *
+	 * @dataProvider data_serialize_collapses_empty_object_without_option
+	 *
+	 * @param string $original   Original block markup.
+	 * @param string $serialized Expected markup after a default parse -> serialize.
+	 */
+	public function test_serialize_collapses_empty_object_without_option( $original, $serialized ) {
+		$blocks = parse_blocks( $original );
+		$this->assertSame( $serialized, serialize_blocks( $blocks ) );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public function data_serialize_collapses_empty_object_without_option() {
+		return array(
+			'empty object collapses to array' => array(
+				'<!-- wp:test {"object":{}} /-->',
+				'<!-- wp:test {"object":[]} /-->',
+			),
+			'nested empty object collapses'   => array(
+				'<!-- wp:test {"nested":{"a":{},"b":[]}} /-->',
+				'<!-- wp:test {"nested":{"a":[],"b":[]}} /-->',
+			),
+			'empty array is unaffected'       => array(
+				'<!-- wp:test {"array":[]} /-->',
+				'<!-- wp:test {"array":[]} /-->',
+			),
+		);
+	}
+
+	/**
+	 * On attributes that were not tagged by object-preserving parsing,
+	 * wp_restore_block_attribute_object_types() must be a structural no-op:
+	 * arrays stay arrays, scalars pass through, and key order is preserved.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::wp_restore_block_attribute_object_types
+	 */
+	public function test_restore_object_types_is_noop_without_marker() {
+		$this->assertSame( 'scalar', wp_restore_block_attribute_object_types( 'scalar' ) );
+		$this->assertSame( 42, wp_restore_block_attribute_object_types( 42 ) );
+		$this->assertNull( wp_restore_block_attribute_object_types( null ) );
+
+		$list = array( 'a', 'b', 'c' );
+		$this->assertSame( $list, wp_restore_block_attribute_object_types( $list ) );
+
+		$assoc = array(
+			'b' => 1,
+			'a' => array( 'nested' => array( 'x', 'y' ) ),
+		);
+		$this->assertSame( $assoc, wp_restore_block_attribute_object_types( $assoc ) );
+	}
+
+	/**
+	 * A tagged array must be re-cast to an object (with the marker stripped),
+	 * recursively, while sibling untagged arrays stay arrays.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::wp_restore_block_attribute_object_types
+	 */
+	public function test_restore_object_types_recasts_tagged_arrays() {
+		$marker = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
+
+		$tagged = array(
+			'list'   => array( 1, 2 ),
+			'object' => array(
+				'inner' => array( $marker => true ),
+				$marker => true,
+			),
+		);
+
+		$restored = wp_restore_block_attribute_object_types( $tagged );
+
+		// Top-level container had no marker, so it stays an array.
+		$this->assertIsArray( $restored );
+		// The plain list stays a list.
+		$this->assertSame( array( 1, 2 ), $restored['list'] );
+		// The tagged value becomes an object with the marker removed.
+		$this->assertInstanceOf( 'stdClass', $restored['object'] );
+		$this->assertObjectNotHasProperty( $marker, $restored['object'] );
+		// Nested tagged value is restored recursively to an (empty) object.
+		$this->assertInstanceOf( 'stdClass', $restored['object']->inner );
+		$this->assertSame( array(), get_object_vars( $restored['object']->inner ) );
+
+		// Round-trips to the expected JSON shape.
+		$this->assertSame(
+			'{"list":[1,2],"object":{"inner":{}}}',
+			wp_json_encode( $restored )
+		);
+	}
+
+	/**
+	 * The KSES block-filtering path (filter_block_content) opts in to
+	 * object-preserving parsing, so empty object attributes must survive it,
+	 * and the internal marker must never leak into the sanitized output.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::filter_block_content
+	 */
+	public function test_filter_block_content_preserves_empty_object_attributes() {
+		$content = '<!-- wp:test {"nested":{"a":{},"b":[]}} /-->';
+
+		$filtered = filter_block_content( $content, 'post' );
+
+		$this->assertSame( $content, $filtered, 'Empty object attribute should survive KSES block filtering.' );
+		$this->assertStringNotContainsString(
+			WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER,
+			$filtered,
+			'The internal object marker must never leak into filtered output.'
+		);
+	}
+
+	/**
 	 * Ensure there are no issues with special character encoding.
 	 *
 	 * @ticket 63917

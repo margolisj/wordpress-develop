@@ -1700,7 +1700,13 @@ function make_after_block_visitor( $hooked_blocks, $context, $callback = 'insert
  * the serializeAttributes JavaScript function in the block editor in order
  * to ensure consistent operation between PHP and JavaScript.
  *
+ * Attributes parsed with the `preserve_empty_object_attributes` option (see
+ * {@see parse_blocks()}) are passed through {@see wp_restore_block_attribute_object_types()}
+ * first, so that values originating from a JSON object are re-encoded as `{}`/`{...}`
+ * rather than `[]`. For attributes parsed the default way this is a no-op.
+ *
  * @since 5.3.1
+ * @since 6.10.0 Restores object-typed attributes tagged by object-preserving parsing.
  *
  * @param array $block_attributes Attributes object.
  * @return string Serialized attributes.
@@ -2536,8 +2542,27 @@ function render_block( $parsed_block ) {
  * instead, as it provides a streaming and low-overhead interface for finding blocks.
  *
  * @since 5.0.0
+ * @since 6.10.0 Added the `$options` parameter.
  *
  * @param string $content Post content.
+ * @param array  $options {
+ *     Optional. Options controlling how block attributes are parsed. Default empty array.
+ *
+ *     @type bool $preserve_empty_object_attributes Whether to preserve the distinction between empty
+ *                                                  JSON object (`{}`) and array (`[]`) attribute values
+ *                                                  that `json_decode( ..., true )` otherwise erases (both
+ *                                                  become an empty PHP array). When enabled, attribute
+ *                                                  values that originated from a JSON object are tagged
+ *                                                  with an internal marker (see
+ *                                                  WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER). Such tagged
+ *                                                  attributes are NOT plain data: callers MUST pass them
+ *                                                  through {@see serialize_block_attributes()} (which is
+ *                                                  done automatically when serializing a block) or
+ *                                                  {@see wp_restore_block_attribute_object_types()} before
+ *                                                  reading, comparing, iterating, or re-encoding them.
+ *                                                  Default false (historical behavior; objects and arrays
+ *                                                  both decode to arrays).
+ * }
  * @return array[] {
  *     Array of block structures.
  *
@@ -2569,12 +2594,22 @@ function parse_blocks( $content, $options = array() ) {
 }
 
 /**
- * Restores object-typed block attributes tagged during object-preserving
- * parsing (see WP_Block_Parser::preserve_object_types()). Recursively strips
- * WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER and re-casts any tagged array back
- * to an object, so wp_json_encode() emits `{}`/`{...}` for objects and
- * `[]`/`[...]` for arrays. On attributes parsed the default way (no marker)
- * this is a no-op, so the render path is byte-for-byte unchanged.
+ * Restores object-typed block attributes tagged during object-preserving parsing.
+ *
+ * When `parse_blocks()` is called with the `preserve_empty_object_attributes`
+ * option, attribute values that came from a JSON object are returned as PHP
+ * arrays carrying an internal marker key (WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER).
+ * This function is the required counterpart: it recursively strips that marker and
+ * re-casts each tagged array back to an object, so that `wp_json_encode()` emits
+ * `{}`/`{...}` for objects and `[]`/`[...]` for arrays.
+ *
+ * It is called automatically by {@see serialize_block_attributes()}, so blocks
+ * serialized through {@see serialize_block()} never expose the marker. Code that
+ * parses with the option and then inspects attributes directly (reading, iterating,
+ * comparing, or re-encoding) must call this first to avoid observing the marker.
+ *
+ * On attributes parsed the default way (no marker) this is a structural no-op, so
+ * the standard render/serialize path is byte-for-byte unchanged.
  *
  * @since 6.10.0
  *
