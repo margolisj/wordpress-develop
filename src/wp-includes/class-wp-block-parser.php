@@ -23,7 +23,7 @@ class WP_Block_Parser {
 	 * Only added when the `preserve_empty_object_attributes` parse option is
 	 * set; the default parse path is unaffected.
 	 *
-	 * @since 6.10.0
+	 * @since 7.1.0
 	 * @var string
 	 */
 	const OBJECT_ATTRIBUTE_MARKER = '__wpBlockAttributeIsObject';
@@ -31,7 +31,7 @@ class WP_Block_Parser {
 	/**
 	 * Options supplied to the most recent parse() call.
 	 *
-	 * @since 6.10.0
+	 * @since 7.1.0
 	 * @var array
 	 */
 	public $options = array();
@@ -78,7 +78,7 @@ class WP_Block_Parser {
 	 * return an error on invalid inputs.
 	 *
 	 * @since 5.0.0
-	 * @since 6.10.0 Added the `$options` parameter.
+	 * @since 7.1.0 Added the `$options` parameter.
 	 *
 	 * @param string $document Input document being parsed.
 	 * @param array  $options  Optional. Parse options. Supports the `preserve_empty_object_attributes`
@@ -419,7 +419,7 @@ class WP_Block_Parser {
 	 * Decodes a block's attribute JSON, optionally preserving the
 	 * array-vs-object distinction that plain json_decode(..., true) erases.
 	 *
-	 * @since 6.10.0
+	 * @since 7.1.0
 	 *
 	 * @param string $json Raw attribute JSON from the block delimiter.
 	 * @return array|null Decoded attributes, or null on invalid JSON.
@@ -449,7 +449,7 @@ class WP_Block_Parser {
 	 * tagging every value that came from a JSON object with
 	 * self::OBJECT_ATTRIBUTE_MARKER so the type can be restored on serialize.
 	 *
-	 * @since 6.10.0
+	 * @since 7.1.0
 	 *
 	 * @param mixed $data              Decoded value (stdClass, array, or scalar).
 	 * @param bool  $is_attribute_root Whether $data is the top-level attribute

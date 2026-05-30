@@ -152,6 +152,33 @@ class Tests_Blocks_Serialize extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Because restoration runs on every serialization, a genuine attribute that
+	 * merely shares the marker's key name (with any value other than the exact
+	 * boolean the parser sets) must be left intact rather than silently dropped.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::wp_restore_block_attribute_object_types
+	 */
+	public function test_restore_object_types_ignores_marker_key_with_non_true_value() {
+		$marker = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
+
+		$value    = array(
+			$marker => 'a genuine value',
+			'a'     => 1,
+		);
+		$restored = wp_restore_block_attribute_object_types( $value );
+
+		// Not our marker, so the array is not re-cast and the key is preserved.
+		$this->assertIsArray( $restored );
+		$this->assertSame( 'a genuine value', $restored[ $marker ] );
+
+		// And it survives a full serialize on the default path.
+		$serialized = serialize_block_attributes( $value );
+		$this->assertStringContainsString( '"' . $marker . '":"a genuine value"', $serialized );
+	}
+
+	/**
 	 * The KSES block-filtering path (filter_block_content) opts in to
 	 * object-preserving parsing, so empty object attributes must survive it,
 	 * and the internal marker must never leak into the sanitized output.

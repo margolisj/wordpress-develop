@@ -1706,7 +1706,7 @@ function make_after_block_visitor( $hooked_blocks, $context, $callback = 'insert
  * rather than `[]`. For attributes parsed the default way this is a no-op.
  *
  * @since 5.3.1
- * @since 6.10.0 Restores object-typed attributes tagged by object-preserving parsing.
+ * @since 7.1.0 Restores object-typed attributes tagged by object-preserving parsing.
  *
  * @param array $block_attributes Attributes object.
  * @return string Serialized attributes.
@@ -2542,7 +2542,7 @@ function render_block( $parsed_block ) {
  * instead, as it provides a streaming and low-overhead interface for finding blocks.
  *
  * @since 5.0.0
- * @since 6.10.0 Added the `$options` parameter.
+ * @since 7.1.0 Added the `$options` parameter.
  *
  * @param string $content Post content.
  * @param array  $options {
@@ -2611,7 +2611,7 @@ function parse_blocks( $content, $options = array() ) {
  * On attributes parsed the default way (no marker) this is a structural no-op, so
  * the standard render/serialize path is byte-for-byte unchanged.
  *
- * @since 6.10.0
+ * @since 7.1.0
  *
  * @param mixed $value A parsed attribute value.
  * @return mixed The value with object types restored.
@@ -2621,8 +2621,18 @@ function wp_restore_block_attribute_object_types( $value ) {
 		return $value;
 	}
 
-	$is_object = array_key_exists( WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER, $value );
-	unset( $value[ WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER ] );
+	/*
+	 * Only treat the marker as ours when it carries the exact boolean the parser
+	 * set. This way a genuine attribute that happens to share the (reserved-by-
+	 * convention) key name with any other value is left untouched, since this
+	 * function runs on every serialize_block_attributes() call, not just on
+	 * attributes produced by object-preserving parsing.
+	 */
+	$is_object = array_key_exists( WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER, $value )
+		&& true === $value[ WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER ];
+	if ( $is_object ) {
+		unset( $value[ WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER ] );
+	}
 
 	foreach ( $value as $key => $child ) {
 		$value[ $key ] = wp_restore_block_attribute_object_types( $child );
