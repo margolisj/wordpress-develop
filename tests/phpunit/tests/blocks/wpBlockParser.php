@@ -139,34 +139,29 @@ class Tests_Blocks_wpBlockParser extends WP_UnitTestCase {
 	}
 
 	/**
-	 * With the `preserve_empty_object_attributes` option, values that came from
-	 * a JSON object are tagged with the object marker, values from a JSON array
-	 * are not, and the top-level attribute container itself is never tagged.
+	 * With the `preserve_object_attribute_types` option, a value that came from a
+	 * JSON object re-encodes as an object and a value that came from a JSON array
+	 * re-encodes as an array, empty ones included.
+	 *
+	 * Asserted through serialize_block_attributes(), which is the contract callers
+	 * rely on. How the parser carries the distinction in between is an
+	 * implementation detail and deliberately not asserted here.
 	 *
 	 * @ticket 63325
 	 *
 	 * @covers ::parse
 	 */
-	public function test_parse_tags_object_types_when_option_is_set() {
-		$marker = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
+	public function test_parse_preserves_object_types_when_option_is_set() {
 		$parser = new WP_Block_Parser();
 		$blocks = $parser->parse(
-			'<!-- wp:test {"object":{"x":1},"array":[1,2]} /-->',
-			array( 'preserve_empty_object_attributes' => true )
+			'<!-- wp:test {"object":{"x":1},"array":[1,2],"emptyObject":{},"emptyArray":[]} /-->',
+			array( 'preserve_object_attribute_types' => true )
 		);
 
-		$attrs = $blocks[0]['attrs'];
-
-		// The top-level attribute container is intentionally not tagged.
-		$this->assertArrayNotHasKey( $marker, $attrs, 'The attribute root must not be tagged.' );
-
-		// A value from a JSON object is tagged.
-		$this->assertArrayHasKey( $marker, $attrs['object'], 'Object-typed value must be tagged.' );
-		$this->assertSame( 1, $attrs['object']['x'], 'Object data must be preserved alongside the marker.' );
-
-		// A value from a JSON array is not tagged and keeps list shape.
-		$this->assertArrayNotHasKey( $marker, $attrs['array'], 'Array-typed value must not be tagged.' );
-		$this->assertSame( array( 1, 2 ), $attrs['array'], 'Array data must be preserved.' );
+		$this->assertSame(
+			'{"object":{"x":1},"array":[1,2],"emptyObject":{},"emptyArray":[]}',
+			serialize_block_attributes( $blocks[0]['attrs'] )
+		);
 	}
 
 	/**
@@ -181,7 +176,7 @@ class Tests_Blocks_wpBlockParser extends WP_UnitTestCase {
 		$parser = new WP_Block_Parser();
 		$blocks = $parser->parse(
 			'<!-- wp:test {"invalid} /-->',
-			array( 'preserve_empty_object_attributes' => true )
+			array( 'preserve_object_attribute_types' => true )
 		);
 
 		$this->assertNull( $blocks[0]['attrs'] );
@@ -201,7 +196,7 @@ class Tests_Blocks_wpBlockParser extends WP_UnitTestCase {
 		$parser = new WP_Block_Parser();
 		$blocks = $parser->parse(
 			'<!-- wp:test {"cfg":{"' . $marker . '":true,"label":"Buy now"}} /-->',
-			array( 'preserve_empty_object_attributes' => true )
+			array( 'preserve_object_attribute_types' => true )
 		);
 
 		$this->assertSame(
@@ -212,21 +207,5 @@ class Tests_Blocks_wpBlockParser extends WP_UnitTestCase {
 			$blocks[0]['attrs']['cfg'],
 			'The author value stored under the marker key must survive tagging.'
 		);
-	}
-
-	/**
-	 * A non-array $options is tolerated: it is treated as no options (default
-	 * behavior) rather than causing an offset access error.
-	 *
-	 * @ticket 63325
-	 *
-	 * @covers ::parse
-	 */
-	public function test_parse_tolerates_non_array_options() {
-		$parser = new WP_Block_Parser();
-		$blocks = $parser->parse( '<!-- wp:test {"object":{}} /-->', 'not-an-array' );
-
-		// Falls back to default behavior: the empty object decodes to an empty array.
-		$this->assertSame( array(), $blocks[0]['attrs']['object'] );
 	}
 }

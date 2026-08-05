@@ -20,7 +20,7 @@ class WP_Block_Parser {
 	 * array back to an object, preserving the `{}` vs `[]` distinction that
 	 * PHP otherwise loses for empty (and numeric-keyed) values.
 	 *
-	 * Only added when the `preserve_empty_object_attributes` parse option is
+	 * Only added when the `preserve_object_attribute_types` parse option is
 	 * set; the default parse path is unaffected.
 	 *
 	 * @since 7.1.0
@@ -42,7 +42,7 @@ class WP_Block_Parser {
 	 * @since 7.1.0
 	 * @var array
 	 */
-	public $options = array();
+	private $options = array();
 
 	/**
 	 * Input document being parsed
@@ -89,18 +89,17 @@ class WP_Block_Parser {
 	 * @since 7.1.0 Added the `$options` parameter.
 	 *
 	 * @param string $document Input document being parsed.
-	 * @param array  $options  Optional. Parse options. Supports the `preserve_empty_object_attributes`
+	 * @param array  $options  Optional. Parse options. Supports the `preserve_object_attribute_types`
 	 *                         key; see {@see parse_blocks()} for its meaning and the contract for
 	 *                         consuming the resulting attributes. Default empty array.
 	 * @return array[]
 	 */
 	public function parse( $document, $options = array() ) {
 		$this->document = $document;
-		// A non-array $options is tolerated and treated as no options (default behavior).
-		$this->options = is_array( $options ) ? $options : array();
-		$this->offset  = 0;
-		$this->output  = array();
-		$this->stack   = array();
+		$this->options  = $options;
+		$this->offset   = 0;
+		$this->output   = array();
+		$this->stack    = array();
 
 		while ( $this->proceed() ) {
 			continue;
@@ -456,7 +455,7 @@ class WP_Block_Parser {
 	 * @return array|null Decoded attributes, or null on invalid JSON.
 	 */
 	private function parse_block_attributes( $json ) {
-		if ( empty( $this->options['preserve_empty_object_attributes'] ) ) {
+		if ( empty( $this->options['preserve_object_attribute_types'] ) ) {
 			// Default (historical) behavior: objects and arrays both decode to arrays.
 			return json_decode( $json, /* associative */ true );
 		}

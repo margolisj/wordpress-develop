@@ -22,7 +22,7 @@ class Tests_Blocks_Serialize extends WP_UnitTestCase {
 	 * @param string $original Original block markup.
 	 */
 	public function test_serialize_identity_with_preserved_object_types( $original ) {
-		$blocks     = parse_blocks( $original, array( 'preserve_empty_object_attributes' => true ) );
+		$blocks     = parse_blocks( $original, array( 'preserve_object_attribute_types' => true ) );
 		$serialized = serialize_blocks( $blocks );
 		$this->assertSame( $original, $serialized );
 	}
@@ -240,7 +240,7 @@ class Tests_Blocks_Serialize extends WP_UnitTestCase {
 
 		$this->assertSame(
 			$content,
-			serialize_blocks( parse_blocks( $content, array( 'preserve_empty_object_attributes' => true ) ) ),
+			serialize_blocks( parse_blocks( $content, array( 'preserve_object_attribute_types' => true ) ) ),
 			'An author-supplied marker key must survive the object-preserving round trip.'
 		);
 
@@ -262,7 +262,7 @@ class Tests_Blocks_Serialize extends WP_UnitTestCase {
 	public function test_serialize_drops_top_level_empty_object_even_with_option() {
 		$blocks = parse_blocks(
 			'<!-- wp:test {} /-->',
-			array( 'preserve_empty_object_attributes' => true )
+			array( 'preserve_object_attribute_types' => true )
 		);
 
 		$this->assertSame( '<!-- wp:test /-->', serialize_blocks( $blocks ) );

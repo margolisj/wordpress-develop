@@ -1246,7 +1246,7 @@ function apply_block_hooks_to_content( $content, $context = null, $callback = 'i
 	$content = traverse_and_serialize_blocks(
 		parse_blocks(
 			$content,
-			array( 'preserve_empty_object_attributes' => true )
+			array( 'preserve_object_attribute_types' => true )
 		),
 		$before_block_visitor,
 		$after_block_visitor
@@ -1706,7 +1706,7 @@ function make_after_block_visitor( $hooked_blocks, $context, $callback = 'insert
  * the serializeAttributes JavaScript function in the block editor in order
  * to ensure consistent operation between PHP and JavaScript.
  *
- * Attributes parsed with the `preserve_empty_object_attributes` option (see
+ * Attributes parsed with the `preserve_object_attribute_types` option (see
  * {@see parse_blocks()}) are passed through {@see wp_restore_block_attribute_object_types()}
  * first, so that values originating from a JSON object are re-encoded as `{}`/`{...}`
  * rather than `[]`. For attributes parsed the default way this is a no-op.
@@ -2143,7 +2143,7 @@ function filter_block_content( $text, $allowed_html = 'post', $allowed_protocols
 
 	$blocks = parse_blocks(
 		$text,
-		array( 'preserve_empty_object_attributes' => true )
+		array( 'preserve_object_attribute_types' => true )
 	);
 	foreach ( $blocks as $block ) {
 		$block   = filter_block_kses( $block, $allowed_html, $allowed_protocols );
@@ -2554,20 +2554,22 @@ function render_block( $parsed_block ) {
  * @param array  $options {
  *     Optional. Options controlling how block attributes are parsed. Default empty array.
  *
- *     @type bool $preserve_empty_object_attributes Whether to preserve the distinction between empty
- *                                                  JSON object (`{}`) and array (`[]`) attribute values
- *                                                  that `json_decode( ..., true )` otherwise erases (both
- *                                                  become an empty PHP array). When enabled, attribute
- *                                                  values that originated from a JSON object are tagged
- *                                                  with an internal marker (see
- *                                                  WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER). Such tagged
- *                                                  attributes are NOT plain data: callers MUST pass them
- *                                                  through {@see serialize_block_attributes()} (which is
- *                                                  done automatically when serializing a block) or
- *                                                  {@see wp_restore_block_attribute_object_types()} before
- *                                                  reading, comparing, iterating, or re-encoding them.
- *                                                  Default false (historical behavior; objects and arrays
- *                                                  both decode to arrays).
+ *     @type bool $preserve_object_attribute_types Whether an attribute value that came from a JSON
+ *                                                 object should re-encode as an object rather than as
+ *                                                 an array. `json_decode( ..., true )` erases the
+ *                                                 distinction for two shapes: an empty object, which
+ *                                                 becomes `[]`, and an object whose keys form a
+ *                                                 `0..n-1` list, which becomes a JSON array. When
+ *                                                 enabled, values that originated from a JSON object
+ *                                                 are tagged with an internal marker (see
+ *                                                 WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER). Such
+ *                                                 tagged attributes are NOT plain data: callers MUST
+ *                                                 pass them through {@see serialize_block_attributes()}
+ *                                                 (done automatically when serializing a block) or
+ *                                                 {@see wp_restore_block_attribute_object_types()}
+ *                                                 before reading, comparing, iterating, or re-encoding
+ *                                                 them. Default false (historical behavior; objects and
+ *                                                 arrays both decode to arrays).
  * }
  * @return array[] {
  *     Array of block structures.
@@ -2602,7 +2604,7 @@ function parse_blocks( $content, $options = array() ) {
 /**
  * Restores object-typed block attributes tagged during object-preserving parsing.
  *
- * When `parse_blocks()` is called with the `preserve_empty_object_attributes`
+ * When `parse_blocks()` is called with the `preserve_object_attribute_types`
  * option, attribute values that came from a JSON object are returned as PHP
  * arrays carrying an internal marker key (WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER).
  * This function is the required counterpart: it recursively strips that marker and
