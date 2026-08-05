@@ -121,13 +121,14 @@ class Tests_Blocks_Serialize extends WP_UnitTestCase {
 	 * @covers ::wp_restore_block_attribute_object_types
 	 */
 	public function test_restore_object_types_recasts_tagged_arrays() {
-		$marker = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
+		$marker   = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
+		$sentinel = WP_Block_Parser::get_object_attribute_marker_value();
 
 		$tagged = array(
 			'list'   => array( 1, 2 ),
 			'object' => array(
-				'inner' => array( $marker => true ),
-				$marker => true,
+				'inner' => array( $marker => $sentinel ),
+				$marker => $sentinel,
 			),
 		);
 
@@ -152,30 +153,74 @@ class Tests_Blocks_Serialize extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Because restoration runs on every serialization, a genuine attribute that
-	 * merely shares the marker's key name (with any value other than the exact
-	 * boolean the parser sets) must be left intact rather than silently dropped.
+	 * Because restoration runs on every serialization, including the default
+	 * parse path, a genuine attribute that merely shares the marker's key name
+	 * must be left intact rather than silently dropped. The marker is matched by
+	 * object identity, so no author-supplied value can collide with it: json_decode()
+	 * cannot produce the parser's sentinel instance.
 	 *
 	 * @ticket 63325
 	 *
+	 * @dataProvider data_restore_object_types_ignores_author_supplied_marker_key
+	 *
 	 * @covers ::wp_restore_block_attribute_object_types
+	 *
+	 * @param mixed  $author_value Value stored under the marker key by a block author.
+	 * @param string $expected     Expected JSON fragment after serialization.
 	 */
-	public function test_restore_object_types_ignores_marker_key_with_non_true_value() {
+	public function test_restore_object_types_ignores_author_supplied_marker_key( $author_value, $expected ) {
 		$marker = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
 
 		$value    = array(
-			$marker => 'a genuine value',
+			$marker => $author_value,
 			'a'     => 1,
 		);
 		$restored = wp_restore_block_attribute_object_types( $value );
 
 		// Not our marker, so the array is not re-cast and the key is preserved.
 		$this->assertIsArray( $restored );
-		$this->assertSame( 'a genuine value', $restored[ $marker ] );
+		$this->assertArrayHasKey( $marker, $restored );
+		$this->assertSame( $author_value, $restored[ $marker ] );
 
 		// And it survives a full serialize on the default path.
-		$serialized = serialize_block_attributes( $value );
-		$this->assertStringContainsString( '"' . $marker . '":"a genuine value"', $serialized );
+		$this->assertStringContainsString( $expected, serialize_block_attributes( $value ) );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public function data_restore_object_types_ignores_author_supplied_marker_key() {
+		$marker = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
+
+		return array(
+			'string value' => array( 'a genuine value', '"' . $marker . '":"a genuine value"' ),
+			'integer one'  => array( 1, '"' . $marker . '":1' ),
+			'boolean true' => array( true, '"' . $marker . '":true' ),
+			'empty array'  => array( array(), '"' . $marker . '":[]' ),
+		);
+	}
+
+	/**
+	 * A block author writing the marker key into their own attribute JSON must
+	 * get it back untouched on the default (render) parse path, which never tags
+	 * anything. This is the end-to-end form of the identity check.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse_blocks
+	 * @covers ::serialize_blocks
+	 */
+	public function test_author_supplied_marker_key_round_trips_on_default_path() {
+		$marker  = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
+		$content = '<!-- wp:test {"other":{"' . $marker . '":true,"keep":"me"}} /-->';
+
+		$this->assertSame(
+			$content,
+			serialize_blocks( parse_blocks( $content ) ),
+			'Default-path round trip must not consume an author-supplied marker key.'
+		);
 	}
 
 	/**

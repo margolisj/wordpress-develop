@@ -29,6 +29,14 @@ class WP_Block_Parser {
 	const OBJECT_ATTRIBUTE_MARKER = '__wpBlockAttributeIsObject';
 
 	/**
+	 * Sentinel stored under self::OBJECT_ATTRIBUTE_MARKER.
+	 *
+	 * @since 7.1.0
+	 * @var stdClass|null
+	 */
+	private static $object_attribute_marker_value = null;
+
+	/**
 	 * Options supplied to the most recent parse() call.
 	 *
 	 * @since 7.1.0
@@ -417,6 +425,28 @@ class WP_Block_Parser {
 	}
 
 	/**
+	 * Returns the sentinel stored under self::OBJECT_ATTRIBUTE_MARKER.
+	 *
+	 * A shared object instance is used rather than a scalar so that the marker is
+	 * recognized by identity. json_decode() cannot produce this instance, so no
+	 * attribute value supplied by a block author can be mistaken for a marker,
+	 * whatever its key name or contents. That matters because restoration runs on
+	 * every serialize_block_attributes() call, including the default parse path
+	 * where no marker is ever set.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @return stdClass The marker sentinel.
+	 */
+	public static function get_object_attribute_marker_value() {
+		if ( null === self::$object_attribute_marker_value ) {
+			self::$object_attribute_marker_value = new stdClass();
+		}
+
+		return self::$object_attribute_marker_value;
+	}
+
+	/**
 	 * Decodes a block's attribute JSON, optionally preserving the
 	 * array-vs-object distinction that plain json_decode(..., true) erases.
 	 *
@@ -464,7 +494,7 @@ class WP_Block_Parser {
 				$array[ $key ] = self::preserve_object_types( $value );
 			}
 			if ( ! $is_attribute_root ) {
-				$array[ self::OBJECT_ATTRIBUTE_MARKER ] = true;
+				$array[ self::OBJECT_ATTRIBUTE_MARKER ] = self::get_object_attribute_marker_value();
 			}
 			return $array;
 		}

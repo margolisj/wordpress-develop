@@ -2622,14 +2622,15 @@ function wp_restore_block_attribute_object_types( $value ) {
 	}
 
 	/*
-	 * Only treat the marker as ours when it carries the exact boolean the parser
-	 * set. This way a genuine attribute that happens to share the (reserved-by-
-	 * convention) key name with any other value is left untouched, since this
-	 * function runs on every serialize_block_attributes() call, not just on
-	 * attributes produced by object-preserving parsing.
+	 * Only treat the marker as ours when it holds the parser's own sentinel
+	 * instance. Comparing by identity rather than by value means a genuine
+	 * attribute that happens to share the key name is always left untouched,
+	 * whatever it contains: json_decode() cannot produce that instance. This
+	 * function runs on every serialize_block_attributes() call, including the
+	 * default parse path, so the check has to be exact.
 	 */
 	$is_object = array_key_exists( WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER, $value )
-		&& true === $value[ WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER ];
+		&& WP_Block_Parser::get_object_attribute_marker_value() === $value[ WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER ];
 	if ( $is_object ) {
 		unset( $value[ WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER ] );
 	}
