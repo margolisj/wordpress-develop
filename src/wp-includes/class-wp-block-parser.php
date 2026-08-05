@@ -37,6 +37,19 @@ class WP_Block_Parser {
 	private static $object_attribute_marker_value = null;
 
 	/**
+	 * Whether any parse in this request has tagged an object attribute.
+	 *
+	 * Markers only ever come from self::preserve_object_types(), so while this is
+	 * false no attribute anywhere can carry one and self::rewrite_object_markers()
+	 * has nothing to find. It only ever goes from false to true, so a stale value
+	 * can cost a pointless walk but can never skip a needed one.
+	 *
+	 * @since 7.1.0
+	 * @var bool
+	 */
+	private static $has_tagged_object_attributes = false;
+
+	/**
 	 * Options supplied to the most recent parse() call.
 	 *
 	 * @since 7.1.0
@@ -433,16 +446,80 @@ class WP_Block_Parser {
 	 * every serialize_block_attributes() call, including the default parse path
 	 * where no marker is ever set.
 	 *
+	 * The sentinel is never handed out: callers ask self::rewrite_object_markers()
+	 * to act on it instead, so it cannot be stored, copied, or forged.
+	 *
 	 * @since 7.1.0
 	 *
 	 * @return stdClass The marker sentinel.
 	 */
-	public static function get_object_attribute_marker_value() {
+	private static function object_attribute_marker() {
 		if ( null === self::$object_attribute_marker_value ) {
 			self::$object_attribute_marker_value = new stdClass();
 		}
 
 		return self::$object_attribute_marker_value;
+	}
+
+	/**
+	 * Rewrites a parsed attribute value that may carry self::OBJECT_ATTRIBUTE_MARKER.
+	 *
+	 * Returns null when no marker was found anywhere in `$value`, which lets callers keep
+	 * the array they already have instead of paying for a rebuilt copy. That is the case
+	 * for every attribute parsed the default way -- the overwhelming majority of calls,
+	 * since {@see serialize_block_attributes()} runs this on every serialization.
+	 *
+	 * Requests that never parse with `preserve_object_attribute_types` skip the traversal
+	 * outright, so callers such as {@see WP_REST_Block_Patterns_Controller}, which
+	 * serialize every registered pattern, pay nothing for a feature they did not opt into.
+	 *
+	 * @since 7.1.0
+	 * @access private
+	 *
+	 * @param mixed $value  A parsed attribute value.
+	 * @param bool  $recast Whether tagged arrays should be re-cast to objects. When false the
+	 *                      markers are only removed, leaving the plain arrays that the default
+	 *                      parse path would have produced.
+	 * @return mixed|null The rewritten value, or null when there was nothing to rewrite.
+	 */
+	public static function rewrite_object_markers( $value, $recast ) {
+		if ( ! self::$has_tagged_object_attributes || ! is_array( $value ) ) {
+			return null;
+		}
+
+		/*
+		 * Only treat the marker as ours when it holds the parser's own sentinel
+		 * instance. Comparing by identity rather than by value means a genuine
+		 * attribute that happens to share the key name is always left untouched,
+		 * whatever it contains: json_decode() cannot produce that instance. This
+		 * runs on every serialize_block_attributes() call, including the default
+		 * parse path, so the check has to be exact.
+		 */
+		$is_tagged = array_key_exists( self::OBJECT_ATTRIBUTE_MARKER, $value )
+			&& self::object_attribute_marker() === $value[ self::OBJECT_ATTRIBUTE_MARKER ];
+		$changed   = $is_tagged;
+
+		foreach ( $value as $key => $child ) {
+			if ( ! is_array( $child ) ) {
+				continue; // Only an array can carry a marker, so scalars need no visit.
+			}
+
+			$rewritten = self::rewrite_object_markers( $child, $recast );
+			if ( null !== $rewritten ) {
+				$value[ $key ] = $rewritten;
+				$changed       = true;
+			}
+		}
+
+		if ( ! $changed ) {
+			return null;
+		}
+
+		if ( $is_tagged ) {
+			unset( $value[ self::OBJECT_ATTRIBUTE_MARKER ] );
+		}
+
+		return $is_tagged && $recast ? (object) $value : $value;
 	}
 
 	/**
@@ -499,7 +576,8 @@ class WP_Block_Parser {
 			 * and therefore re-encodes as a JSON object without any help.
 			 */
 			if ( ! $is_attribute_root && ! array_key_exists( self::OBJECT_ATTRIBUTE_MARKER, $array ) ) {
-				$array[ self::OBJECT_ATTRIBUTE_MARKER ] = self::get_object_attribute_marker_value();
+				$array[ self::OBJECT_ATTRIBUTE_MARKER ] = self::object_attribute_marker();
+				self::$has_tagged_object_attributes     = true;
 			}
 			return $array;
 		}

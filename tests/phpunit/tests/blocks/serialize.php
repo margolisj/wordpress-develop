@@ -121,18 +121,15 @@ class Tests_Blocks_Serialize extends WP_UnitTestCase {
 	 * @covers ::wp_restore_block_attribute_object_types
 	 */
 	public function test_restore_object_types_recasts_tagged_arrays() {
-		$marker   = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
-		$sentinel = WP_Block_Parser::get_object_attribute_marker_value();
+		$marker = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
 
-		$tagged = array(
-			'list'   => array( 1, 2 ),
-			'object' => array(
-				'inner' => array( $marker => $sentinel ),
-				$marker => $sentinel,
-			),
+		// Tagged input comes from the parser itself; the marker sentinel is not forgeable.
+		$blocks = parse_blocks(
+			'<!-- wp:test {"list":[1,2],"object":{"inner":{}}} /-->',
+			array( 'preserve_object_attribute_types' => true )
 		);
 
-		$restored = wp_restore_block_attribute_object_types( $tagged );
+		$restored = wp_restore_block_attribute_object_types( $blocks[0]['attrs'] );
 
 		// Top-level container had no marker, so it stays an array.
 		$this->assertIsArray( $restored );

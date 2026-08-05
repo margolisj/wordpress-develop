@@ -2625,66 +2625,9 @@ function parse_blocks( $content, $options = array() ) {
  * @return mixed The value with object types restored.
  */
 function wp_restore_block_attribute_object_types( $value ) {
-	$restored = _wp_walk_block_attribute_object_markers( $value, true );
+	$restored = WP_Block_Parser::rewrite_object_markers( $value, /* recast */ true );
 
 	return null === $restored ? $value : $restored;
-}
-
-/**
- * Rewrites block attributes carrying the parser's internal object markers.
- *
- * Returns null when no marker was found anywhere in `$value`, which lets callers keep
- * the array they already have instead of paying for a rebuilt copy. That is the case
- * for every attribute parsed the default way -- the overwhelming majority of calls,
- * since {@see serialize_block_attributes()} runs this on every serialization.
- *
- * @since 7.1.0
- * @access private
- *
- * @param mixed $value  A parsed attribute value.
- * @param bool  $recast Whether tagged arrays should be re-cast to objects. When false the
- *                      markers are only removed, leaving the plain arrays that the default
- *                      parse path would have produced.
- * @return mixed|null The rewritten value, or null when there was nothing to rewrite.
- */
-function _wp_walk_block_attribute_object_markers( $value, $recast ) {
-	if ( ! is_array( $value ) ) {
-		return null;
-	}
-
-	/*
-	 * Only treat the marker as ours when it holds the parser's own sentinel
-	 * instance. Comparing by identity rather than by value means a genuine
-	 * attribute that happens to share the key name is always left untouched,
-	 * whatever it contains: json_decode() cannot produce that instance. This
-	 * runs on every serialize_block_attributes() call, including the default
-	 * parse path, so the check has to be exact.
-	 */
-	$is_tagged = array_key_exists( WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER, $value )
-		&& WP_Block_Parser::get_object_attribute_marker_value() === $value[ WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER ];
-	$changed   = $is_tagged;
-
-	foreach ( $value as $key => $child ) {
-		if ( ! is_array( $child ) ) {
-			continue; // Only an array can carry a marker, so scalars need no visit.
-		}
-
-		$rewritten = _wp_walk_block_attribute_object_markers( $child, $recast );
-		if ( null !== $rewritten ) {
-			$value[ $key ] = $rewritten;
-			$changed       = true;
-		}
-	}
-
-	if ( ! $changed ) {
-		return null;
-	}
-
-	if ( $is_tagged ) {
-		unset( $value[ WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER ] );
-	}
-
-	return $is_tagged && $recast ? (object) $value : $value;
 }
 
 /**
@@ -2706,7 +2649,7 @@ function _wp_remove_block_attribute_object_markers( $parsed_block ) {
 		return $parsed_block;
 	}
 
-	$stripped = _wp_walk_block_attribute_object_markers( $parsed_block['attrs'], false );
+	$stripped = WP_Block_Parser::rewrite_object_markers( $parsed_block['attrs'], /* recast */ false );
 	if ( null !== $stripped ) {
 		$parsed_block['attrs'] = $stripped;
 	}
