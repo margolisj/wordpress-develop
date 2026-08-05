@@ -570,12 +570,15 @@ class WP_Block_Parser {
 				$array[ $key ] = self::preserve_object_types( $value );
 			}
 			/*
-			 * Never write over a key the block author supplied: that would destroy
-			 * their value. Leaving such an object untagged is always correct, because
-			 * an object containing the marker key necessarily has a non-numeric key
-			 * and therefore re-encodes as a JSON object without any help.
+			 * Only tag an object whose array form is a list. json_encode() already
+			 * emits an object for every array that is not a list, so any other object
+			 * round-trips without help and a marker on it would be pure cost.
+			 *
+			 * This is also what keeps a block author's own data safe: a list holds no
+			 * string keys, so an object that already carries the marker key is never
+			 * a candidate for tagging and its value can never be overwritten.
 			 */
-			if ( ! $is_attribute_root && ! array_key_exists( self::OBJECT_ATTRIBUTE_MARKER, $array ) ) {
+			if ( ! $is_attribute_root && array_is_list( $array ) ) {
 				$array[ self::OBJECT_ATTRIBUTE_MARKER ] = self::object_attribute_marker();
 				self::$has_tagged_object_attributes     = true;
 			}

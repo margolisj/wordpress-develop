@@ -113,38 +113,43 @@ class Tests_Blocks_Serialize extends WP_UnitTestCase {
 	}
 
 	/**
-	 * A tagged array must be re-cast to an object (with the marker stripped),
-	 * recursively, while sibling untagged arrays stay arrays.
+	 * Only the objects that PHP arrays cannot express are re-cast, recursively.
+	 *
+	 * An object with at least one non-sequential key already re-encodes as a JSON
+	 * object, so it is never tagged and stays a plain array -- which also keeps
+	 * ordinary array access working on restored attributes. The objects that do
+	 * need help are the ones whose array form is a list: the empty object, and the
+	 * object whose keys happen to run 0..n-1.
 	 *
 	 * @ticket 63325
 	 *
 	 * @covers ::wp_restore_block_attribute_object_types
 	 */
 	public function test_restore_object_types_recasts_tagged_arrays() {
-		$marker = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
-
 		// Tagged input comes from the parser itself; the marker sentinel is not forgeable.
 		$blocks = parse_blocks(
-			'<!-- wp:test {"list":[1,2],"object":{"inner":{}}} /-->',
+			'<!-- wp:test {"list":[1,2],"object":{"inner":{}},"numeric":{"0":"a"}} /-->',
 			array( 'preserve_object_attribute_types' => true )
 		);
 
 		$restored = wp_restore_block_attribute_object_types( $blocks[0]['attrs'] );
 
-		// Top-level container had no marker, so it stays an array.
+		// Top-level container is never tagged, so it stays an array.
 		$this->assertIsArray( $restored );
 		// The plain list stays a list.
 		$this->assertSame( array( 1, 2 ), $restored['list'] );
-		// The tagged value becomes an object with the marker removed.
-		$this->assertInstanceOf( 'stdClass', $restored['object'] );
-		$this->assertObjectNotHasProperty( $marker, $restored['object'] );
-		// Nested tagged value is restored recursively to an (empty) object.
-		$this->assertInstanceOf( 'stdClass', $restored['object']->inner );
-		$this->assertSame( array(), get_object_vars( $restored['object']->inner ) );
+		// A keyed object needs no marker, so it is still an array after restoration.
+		$this->assertIsArray( $restored['object'] );
+		// The empty object inside it could not survive as an array, so it was tagged.
+		$this->assertInstanceOf( 'stdClass', $restored['object']['inner'] );
+		$this->assertSame( array(), get_object_vars( $restored['object']['inner'] ) );
+		// An object whose keys form a list would encode as an array, so it was tagged too.
+		$this->assertInstanceOf( 'stdClass', $restored['numeric'] );
+		$this->assertObjectNotHasProperty( WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER, $restored['numeric'] );
 
 		// Round-trips to the expected JSON shape.
 		$this->assertSame(
-			'{"list":[1,2],"object":{"inner":{}}}',
+			'{"list":[1,2],"object":{"inner":{}},"numeric":{"0":"a"}}',
 			wp_json_encode( $restored )
 		);
 	}
