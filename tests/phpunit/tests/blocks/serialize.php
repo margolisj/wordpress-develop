@@ -358,4 +358,89 @@ class Tests_Blocks_Serialize extends WP_UnitTestCase {
 
 		$this->assertSame( $markup, $actual );
 	}
+
+	/**
+	 * @dataProvider data_serialize_identity_preserving_empty_object_attributes
+	 *
+	 * @ticket 63325
+	 *
+	 * @param string $original Original block markup.
+	 */
+	public function test_serialize_identity_preserving_empty_object_attributes( $original ) {
+		$blocks = _wp_parse_blocks_preserving_empty_object_attributes( $original );
+
+		$this->assertSame( $original, serialize_blocks( $blocks ) );
+	}
+
+	public static function data_serialize_identity_preserving_empty_object_attributes(): array {
+		return array(
+			'Empty object and empty array side by side' =>
+				array( '<!-- wp:test {"emptyObject":{},"emptyArray":[]} /-->' ),
+
+			'Deeply nested empty object'                =>
+				array( '<!-- wp:test {"one":{"two":{"empty":{}}}} /-->' ),
+
+			'Empty objects inside an array'             =>
+				array( '<!-- wp:test {"items":[{},[],{"nested":{}}]} /-->' ),
+
+			'Reported responsive attribute shape'       =>
+				array( '<!-- wp:test {"blockId":"block-RX3iloq4aK","bgColor":{"desktop":{"color":"red"},"tablet":{},"mobile":{},"hover":{}}} /-->' ),
+
+			'Empty object in an inner block'            =>
+				array( '<!-- wp:outer --><!-- wp:inner {"empty":{}} /--><!-- /wp:outer -->' ),
+		);
+	}
+
+	/**
+	 * The whole attributes value is still dropped when it is an empty object, as it
+	 * always has been.
+	 *
+	 * @ticket 63325
+	 */
+	public function test_serialize_drops_top_level_empty_object_attributes() {
+		$blocks = _wp_parse_blocks_preserving_empty_object_attributes( '<!-- wp:test {} /-->' );
+
+		$this->assertSame( '<!-- wp:test /-->', serialize_blocks( $blocks ) );
+	}
+
+	/**
+	 * The preserved shape must not put anything of its own into the serialized markup.
+	 *
+	 * @ticket 63325
+	 */
+	public function test_serialize_does_not_leak_internal_data_into_markup() {
+		$original = '<!-- wp:test {"outer":{"empty":{},"list":[{}]}} /-->';
+		$blocks   = _wp_parse_blocks_preserving_empty_object_attributes( $original );
+
+		$actual = serialize_blocks( $blocks );
+
+		$this->assertSame( $original, $actual, 'The markup should round trip unchanged.' );
+		$this->assertStringNotContainsString( '__', $actual, 'No internal key should reach the markup.' );
+		$this->assertStringNotContainsString( 'stdClass', $actual, 'No internal type name should reach the markup.' );
+	}
+
+	/**
+	 * A replacement parser that predates `parse_with_options()` must keep working.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::_wp_parse_blocks_preserving_empty_object_attributes
+	 */
+	public function test_preserving_parse_falls_back_for_a_parser_without_parse_with_options() {
+		require_once DIR_TESTDATA . '/blocks/legacy-block-parser.php';
+
+		add_filter( 'block_parser_class', array( __CLASS__, 'return_legacy_block_parser_class' ) );
+		$blocks = _wp_parse_blocks_preserving_empty_object_attributes( '<!-- wp:test {"empty":{}} /-->' );
+		remove_filter( 'block_parser_class', array( __CLASS__, 'return_legacy_block_parser_class' ) );
+
+		$this->assertSame(
+			array( 'empty' => array() ),
+			$blocks[0]['attrs'],
+			'A parser without parse_with_options() should fall back to its own parse() behavior.'
+		);
+	}
+
+	public static function return_legacy_block_parser_class() {
+		return 'Tests_Legacy_Block_Parser';
+	}
 }

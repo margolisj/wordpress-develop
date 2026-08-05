@@ -209,4 +209,110 @@ class Tests_Blocks_InsertHookedBlocks extends WP_UnitTestCase {
 
 		$this->assertSame( '', $actual, "No markup should've been generated for hooked block suppressed by filter." );
 	}
+
+	/**
+	 * `metadata` arrives as an empty object on the empty object preserving parse path.
+	 *
+	 * @ticket 63325
+	 */
+	public function test_insert_hooked_blocks_with_object_shaped_metadata() {
+		$anchor_block = array(
+			'blockName' => self::ANCHOR_BLOCK_TYPE,
+			'attrs'     => array( 'metadata' => new stdClass() ),
+		);
+
+		$actual = insert_hooked_blocks( $anchor_block, 'after', self::HOOKED_BLOCKS, array() );
+
+		$this->assertSame(
+			'<!-- wp:' . self::HOOKED_BLOCK_TYPE . ' /-->',
+			$actual,
+			'An empty metadata object ignores nothing, so the hooked block should be inserted.'
+		);
+	}
+
+	/**
+	 * @ticket 63325
+	 */
+	public function test_insert_hooked_blocks_with_object_shaped_ignored_hooked_blocks() {
+		$anchor_block = array(
+			'blockName' => self::ANCHOR_BLOCK_TYPE,
+			'attrs'     => array(
+				'metadata' => array( 'ignoredHookedBlocks' => new stdClass() ),
+			),
+		);
+
+		$actual = insert_hooked_blocks( $anchor_block, 'after', self::HOOKED_BLOCKS, array() );
+
+		$this->assertSame(
+			'<!-- wp:' . self::HOOKED_BLOCK_TYPE . ' /-->',
+			$actual,
+			'An empty ignored blocks object ignores nothing.'
+		);
+	}
+
+	/**
+	 * @ticket 63325
+	 */
+	public function test_insert_hooked_blocks_still_honors_a_list_containing_a_non_string() {
+		$anchor_block = array(
+			'blockName' => self::ANCHOR_BLOCK_TYPE,
+			'attrs'     => array(
+				'metadata' => array(
+					'ignoredHookedBlocks' => array( new stdClass(), self::HOOKED_BLOCK_TYPE ),
+				),
+			),
+		);
+
+		$actual = insert_hooked_blocks( $anchor_block, 'after', self::HOOKED_BLOCKS, array() );
+
+		$this->assertSame(
+			'',
+			$actual,
+			'A named ignored block should still be honored beside a non-string entry.'
+		);
+	}
+
+	/**
+	 * @ticket 63325
+	 */
+	public function test_insert_hooked_blocks_passes_array_shaped_anchor_block_to_filters() {
+		$anchor_block = array(
+			'blockName' => self::ANCHOR_BLOCK_TYPE,
+			'attrs'     => array( 'layout' => array( 'columns' => new stdClass() ) ),
+		);
+
+		$observed = null;
+		$filter   = static function ( $parsed_hooked_block, $hooked_block_type, $relative_position, $parsed_anchor_block ) use ( &$observed ) {
+			$observed = $parsed_anchor_block;
+			return $parsed_hooked_block;
+		};
+
+		add_filter( 'hooked_block', $filter, 10, 4 );
+		insert_hooked_blocks( $anchor_block, 'after', self::HOOKED_BLOCKS, array() );
+		remove_filter( 'hooked_block', $filter );
+
+		$this->assertNotNull( $observed, 'The hooked_block filter should have run.' );
+		$this->assertIsArray(
+			$observed['attrs']['layout']['columns'],
+			'Filter callbacks should not see the preserved object.'
+		);
+		$this->assertInstanceOf(
+			'stdClass',
+			$anchor_block['attrs']['layout']['columns'],
+			'The anchor block itself should keep the preserved object.'
+		);
+	}
+
+	/**
+	 * @ticket 63325
+	 */
+	public function test_insert_hooked_blocks_returns_empty_string_when_nothing_is_hooked() {
+		$anchor_block = array(
+			'blockName' => self::ANCHOR_BLOCK_TYPE,
+		);
+
+		$actual = insert_hooked_blocks( $anchor_block, 'first_child', self::HOOKED_BLOCKS, array() );
+
+		$this->assertSame( '', $actual, 'No markup should be generated when no block types are hooked.' );
+	}
 }

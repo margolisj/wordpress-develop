@@ -75,6 +75,180 @@ class Tests_Blocks_wpBlockParser extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The default parse must keep collapsing both shapes to an array.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse
+	 */
+	public function test_parse_collapses_empty_objects_by_default() {
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse( '<!-- wp:test {"object":{},"array":[]} /-->' );
+
+		$this->assertSame(
+			array(
+				'object' => array(),
+				'array'  => array(),
+			),
+			$blocks[0]['attrs'],
+			'The default parse should decode both an empty object and an empty array as an empty array.'
+		);
+	}
+
+	/**
+	 * @ticket 63325
+	 *
+	 * @covers ::parse_with_options
+	 */
+	public function test_parse_with_options_preserves_nested_empty_objects() {
+		$attrs = $this->parse_attributes_preserving_empty_objects( '{"object":{},"array":[]}' );
+
+		$this->assertInstanceOf(
+			'stdClass',
+			$attrs['object'],
+			'An empty object should be preserved as an object.'
+		);
+		$this->assertSame(
+			array(),
+			$attrs['array'],
+			'An empty array should stay an empty array.'
+		);
+	}
+
+	/**
+	 * @ticket 63325
+	 *
+	 * @covers ::parse_with_options
+	 */
+	public function test_parse_with_options_converts_non_empty_objects_to_arrays() {
+		$attrs = $this->parse_attributes_preserving_empty_objects( '{"object":{"enabled":true}}' );
+
+		$this->assertSame(
+			array( 'enabled' => true ),
+			$attrs['object'],
+			'A non-empty object should be converted to an array, as it has always been.'
+		);
+	}
+
+	/**
+	 * @ticket 63325
+	 *
+	 * @covers ::parse_with_options
+	 */
+	public function test_parse_with_options_preserves_deeply_nested_empty_objects() {
+		$attrs = $this->parse_attributes_preserving_empty_objects( '{"one":{"two":{"empty":{}}}}' );
+
+		$this->assertIsArray( $attrs['one'], 'An object with properties should be an array.' );
+		$this->assertIsArray( $attrs['one']['two'], 'An object with properties should be an array.' );
+		$this->assertInstanceOf(
+			'stdClass',
+			$attrs['one']['two']['empty'],
+			'Only the innermost empty object should be preserved as an object.'
+		);
+	}
+
+	/**
+	 * @ticket 63325
+	 *
+	 * @covers ::parse_with_options
+	 */
+	public function test_parse_with_options_preserves_empty_objects_inside_arrays() {
+		$attrs = $this->parse_attributes_preserving_empty_objects( '{"items":[{},[],{"nested":{}}]}' );
+
+		$this->assertInstanceOf( 'stdClass', $attrs['items'][0], 'An empty object in a list should be preserved.' );
+		$this->assertSame( array(), $attrs['items'][1], 'An empty array in a list should stay an array.' );
+		$this->assertInstanceOf(
+			'stdClass',
+			$attrs['items'][2]['nested'],
+			'An empty object nested inside a list entry should be preserved.'
+		);
+	}
+
+	/**
+	 * The block's whole attributes value is always an array, so that a block whose only
+	 * attribute content is `{}` keeps serializing without any attributes.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse_with_options
+	 */
+	public function test_parse_with_options_converts_the_top_level_attributes_object() {
+		$attrs = $this->parse_attributes_preserving_empty_objects( '{}' );
+
+		$this->assertSame( array(), $attrs, 'The top-level attributes value should be an array.' );
+	}
+
+	/**
+	 * @ticket 63325
+	 *
+	 * @covers ::parse_with_options
+	 * @covers ::parse
+	 */
+	public function test_parse_with_options_returns_null_attributes_for_invalid_json() {
+		$document = '<!-- wp:test {invalid} /-->';
+
+		$default_parser = new WP_Block_Parser();
+		$default_blocks = $default_parser->parse( $document );
+
+		$attrs = $this->parse_attributes_preserving_empty_objects( '{invalid}' );
+
+		$this->assertNull( $default_blocks[0]['attrs'], 'Invalid attribute JSON parses as null by default.' );
+		$this->assertNull( $attrs, 'Invalid attribute JSON should parse as null on the preserving path too.' );
+	}
+
+	/**
+	 * @ticket 63325
+	 *
+	 * @covers ::parse_with_options
+	 */
+	public function test_parse_with_options_tolerates_a_non_array_options_argument() {
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse_with_options( '<!-- wp:test {"object":{}} /-->', true );
+
+		$this->assertSame(
+			array( 'object' => array() ),
+			$blocks[0]['attrs'],
+			'A non-array options argument should fall back to the default behavior.'
+		);
+	}
+
+	/**
+	 * @ticket 63325
+	 *
+	 * @covers ::parse_with_options
+	 * @covers ::parse
+	 */
+	public function test_parse_with_options_does_not_leak_options_into_a_later_parse() {
+		$document = '<!-- wp:test {"object":{}} /-->';
+		$parser   = new WP_Block_Parser();
+
+		$parser->parse_with_options( $document, array( 'preserve_empty_object_attributes' => true ) );
+		$blocks = $parser->parse( $document );
+
+		$this->assertSame(
+			array( 'object' => array() ),
+			$blocks[0]['attrs'],
+			'Options should apply to a single parse, not to the parser instance.'
+		);
+	}
+
+	/**
+	 * Helper to parse a single block's attributes with empty object preservation enabled.
+	 *
+	 * @param string $attributes_json Attribute JSON for the block delimiter.
+	 * @return array|null The parsed attributes.
+	 */
+	private function parse_attributes_preserving_empty_objects( $attributes_json ) {
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse_with_options(
+			'<!-- wp:test ' . $attributes_json . ' /-->',
+			array( 'preserve_empty_object_attributes' => true )
+		);
+
+		return $blocks[0]['attrs'];
+	}
+
+	/**
 	 * Helper function to remove relative paths and extension from a filename, leaving just the fixture name.
 	 *
 	 * @since 5.0.0
