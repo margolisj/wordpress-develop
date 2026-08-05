@@ -188,6 +188,33 @@ class Tests_Blocks_wpBlockParser extends WP_UnitTestCase {
 	}
 
 	/**
+	 * Tagging must never write over a key the block author already supplied, on the
+	 * object-preserving path either. Skipping the tag is safe: an object containing
+	 * the marker key has a non-numeric key and so re-encodes as an object regardless.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse
+	 */
+	public function test_parse_with_option_does_not_clobber_author_supplied_marker_key() {
+		$marker = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse(
+			'<!-- wp:test {"cfg":{"' . $marker . '":true,"label":"Buy now"}} /-->',
+			array( 'preserve_empty_object_attributes' => true )
+		);
+
+		$this->assertSame(
+			array(
+				$marker => true,
+				'label' => 'Buy now',
+			),
+			$blocks[0]['attrs']['cfg'],
+			'The author value stored under the marker key must survive tagging.'
+		);
+	}
+
+	/**
 	 * A non-array $options is tolerated: it is treated as no options (default
 	 * behavior) rather than causing an offset access error.
 	 *

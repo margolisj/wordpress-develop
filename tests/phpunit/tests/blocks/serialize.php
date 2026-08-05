@@ -224,6 +224,34 @@ class Tests_Blocks_Serialize extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The end-to-end form of the previous test, on the object-preserving path this
+	 * time. This is the path `filter_block_content()` and the Block Hooks algorithm
+	 * use, so a block author who happens to name an attribute key after the marker
+	 * must not lose it on save.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse_blocks
+	 * @covers ::serialize_blocks
+	 */
+	public function test_author_supplied_marker_key_round_trips_on_object_preserving_path() {
+		$marker  = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
+		$content = '<!-- wp:test {"cfg":{"' . $marker . '":true,"label":"Buy now"},"empty":{}} /-->';
+
+		$this->assertSame(
+			$content,
+			serialize_blocks( parse_blocks( $content, array( 'preserve_empty_object_attributes' => true ) ) ),
+			'An author-supplied marker key must survive the object-preserving round trip.'
+		);
+
+		$this->assertSame(
+			$content,
+			filter_block_content( $content, 'post' ),
+			'It must survive the KSES save path, which opts in to object preservation.'
+		);
+	}
+
+	/**
 	 * The attribute root is intentionally never tagged, so a block whose entire
 	 * attribute set is an empty object is still serialized without attributes,
 	 * even when object preservation is enabled. This locks in that scoping (the

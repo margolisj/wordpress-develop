@@ -1025,6 +1025,9 @@ function insert_hooked_blocks( &$parsed_anchor_block, $relative_position, $hooke
 	 */
 	$hooked_block_types = apply_filters( 'hooked_block_types', $hooked_block_types, $relative_position, $anchor_block_type, $context );
 
+	// Filters receive the anchor block without the parser's internal object markers.
+	$filtered_anchor_block = _wp_remove_block_attribute_object_markers( $parsed_anchor_block );
+
 	$markup = '';
 	foreach ( $hooked_block_types as $hooked_block_type ) {
 		$parsed_hooked_block = array(
@@ -1047,7 +1050,7 @@ function insert_hooked_blocks( &$parsed_anchor_block, $relative_position, $hooke
 		 * @param WP_Block_Template|WP_Post|array $context             The block template, template part, post object,
 		 *                                                             or pattern that the anchor block belongs to.
 		 */
-		$parsed_hooked_block = apply_filters( 'hooked_block', $parsed_hooked_block, $hooked_block_type, $relative_position, $parsed_anchor_block, $context );
+		$parsed_hooked_block = apply_filters( 'hooked_block', $parsed_hooked_block, $hooked_block_type, $relative_position, $filtered_anchor_block, $context );
 
 		/**
 		 * Filters the parsed block array for a given hooked block.
@@ -1063,7 +1066,7 @@ function insert_hooked_blocks( &$parsed_anchor_block, $relative_position, $hooke
 		 * @param WP_Block_Template|WP_Post|array $context             The block template, template part, post object,
 		 *                                                             or pattern that the anchor block belongs to.
 		 */
-		$parsed_hooked_block = apply_filters( "hooked_block_{$hooked_block_type}", $parsed_hooked_block, $hooked_block_type, $relative_position, $parsed_anchor_block, $context );
+		$parsed_hooked_block = apply_filters( "hooked_block_{$hooked_block_type}", $parsed_hooked_block, $hooked_block_type, $relative_position, $filtered_anchor_block, $context );
 
 		if ( null === $parsed_hooked_block ) {
 			continue;
@@ -1109,6 +1112,9 @@ function set_ignored_hooked_blocks_metadata( &$parsed_anchor_block, $relative_po
 		return '';
 	}
 
+	// Filters receive the anchor block without the parser's internal object markers.
+	$filtered_anchor_block = _wp_remove_block_attribute_object_markers( $parsed_anchor_block );
+
 	foreach ( $hooked_block_types as $index => $hooked_block_type ) {
 		$parsed_hooked_block = array(
 			'blockName'    => $hooked_block_type,
@@ -1118,10 +1124,10 @@ function set_ignored_hooked_blocks_metadata( &$parsed_anchor_block, $relative_po
 		);
 
 		/** This filter is documented in wp-includes/blocks.php */
-		$parsed_hooked_block = apply_filters( 'hooked_block', $parsed_hooked_block, $hooked_block_type, $relative_position, $parsed_anchor_block, $context );
+		$parsed_hooked_block = apply_filters( 'hooked_block', $parsed_hooked_block, $hooked_block_type, $relative_position, $filtered_anchor_block, $context );
 
 		/** This filter is documented in wp-includes/blocks.php */
-		$parsed_hooked_block = apply_filters( "hooked_block_{$hooked_block_type}", $parsed_hooked_block, $hooked_block_type, $relative_position, $parsed_anchor_block, $context );
+		$parsed_hooked_block = apply_filters( "hooked_block_{$hooked_block_type}", $parsed_hooked_block, $hooked_block_type, $relative_position, $filtered_anchor_block, $context );
 
 		if ( null === $parsed_hooked_block ) {
 			unset( $hooked_block_types[ $index ] );
@@ -2617,8 +2623,31 @@ function parse_blocks( $content, $options = array() ) {
  * @return mixed The value with object types restored.
  */
 function wp_restore_block_attribute_object_types( $value ) {
+	$restored = _wp_walk_block_attribute_object_markers( $value, true );
+
+	return null === $restored ? $value : $restored;
+}
+
+/**
+ * Rewrites block attributes carrying the parser's internal object markers.
+ *
+ * Returns null when no marker was found anywhere in `$value`, which lets callers keep
+ * the array they already have instead of paying for a rebuilt copy. That is the case
+ * for every attribute parsed the default way -- the overwhelming majority of calls,
+ * since {@see serialize_block_attributes()} runs this on every serialization.
+ *
+ * @since 7.1.0
+ * @access private
+ *
+ * @param mixed $value  A parsed attribute value.
+ * @param bool  $recast Whether tagged arrays should be re-cast to objects. When false the
+ *                      markers are only removed, leaving the plain arrays that the default
+ *                      parse path would have produced.
+ * @return mixed|null The rewritten value, or null when there was nothing to rewrite.
+ */
+function _wp_walk_block_attribute_object_markers( $value, $recast ) {
 	if ( ! is_array( $value ) ) {
-		return $value;
+		return null;
 	}
 
 	/*
@@ -2626,20 +2655,61 @@ function wp_restore_block_attribute_object_types( $value ) {
 	 * instance. Comparing by identity rather than by value means a genuine
 	 * attribute that happens to share the key name is always left untouched,
 	 * whatever it contains: json_decode() cannot produce that instance. This
-	 * function runs on every serialize_block_attributes() call, including the
-	 * default parse path, so the check has to be exact.
+	 * runs on every serialize_block_attributes() call, including the default
+	 * parse path, so the check has to be exact.
 	 */
-	$is_object = array_key_exists( WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER, $value )
+	$is_tagged = array_key_exists( WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER, $value )
 		&& WP_Block_Parser::get_object_attribute_marker_value() === $value[ WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER ];
-	if ( $is_object ) {
+	$changed   = $is_tagged;
+
+	foreach ( $value as $key => $child ) {
+		if ( ! is_array( $child ) ) {
+			continue; // Only an array can carry a marker, so scalars need no visit.
+		}
+
+		$rewritten = _wp_walk_block_attribute_object_markers( $child, $recast );
+		if ( null !== $rewritten ) {
+			$value[ $key ] = $rewritten;
+			$changed       = true;
+		}
+	}
+
+	if ( ! $changed ) {
+		return null;
+	}
+
+	if ( $is_tagged ) {
 		unset( $value[ WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER ] );
 	}
 
-	foreach ( $value as $key => $child ) {
-		$value[ $key ] = wp_restore_block_attribute_object_types( $child );
+	return $is_tagged && $recast ? (object) $value : $value;
+}
+
+/**
+ * Returns a parsed block whose attributes carry no internal object markers.
+ *
+ * The Block Hooks algorithm parses with object preservation enabled, so an anchor block
+ * handed to a third-party filter would otherwise expose the marker. Removing it without
+ * re-casting to objects gives filters exactly the attribute shape they would see on the
+ * default parse path, which is also the shape they saw before object preservation existed.
+ *
+ * @since 7.1.0
+ * @access private
+ *
+ * @param array $parsed_block A block, in parsed block array format.
+ * @return array The block with marker-free attributes.
+ */
+function _wp_remove_block_attribute_object_markers( $parsed_block ) {
+	if ( empty( $parsed_block['attrs'] ) || ! is_array( $parsed_block['attrs'] ) ) {
+		return $parsed_block;
 	}
 
-	return $is_object ? (object) $value : $value;
+	$stripped = _wp_walk_block_attribute_object_markers( $parsed_block['attrs'], false );
+	if ( null !== $stripped ) {
+		$parsed_block['attrs'] = $stripped;
+	}
+
+	return $parsed_block;
 }
 
 /**

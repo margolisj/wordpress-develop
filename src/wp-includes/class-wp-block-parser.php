@@ -493,7 +493,13 @@ class WP_Block_Parser {
 			foreach ( get_object_vars( $data ) as $key => $value ) {
 				$array[ $key ] = self::preserve_object_types( $value );
 			}
-			if ( ! $is_attribute_root ) {
+			/*
+			 * Never write over a key the block author supplied: that would destroy
+			 * their value. Leaving such an object untagged is always correct, because
+			 * an object containing the marker key necessarily has a non-numeric key
+			 * and therefore re-encodes as a JSON object without any help.
+			 */
+			if ( ! $is_attribute_root && ! array_key_exists( self::OBJECT_ATTRIBUTE_MARKER, $array ) ) {
 				$array[ self::OBJECT_ATTRIBUTE_MARKER ] = self::get_object_attribute_marker_value();
 			}
 			return $array;
