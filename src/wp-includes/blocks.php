@@ -1025,6 +1025,9 @@ function insert_hooked_blocks( &$parsed_anchor_block, $relative_position, $hooke
 	 */
 	$hooked_block_types = apply_filters( 'hooked_block_types', $hooked_block_types, $relative_position, $anchor_block_type, $context );
 
+	// Filters receive the anchor block without the parser's internal object markers.
+	$filtered_anchor_block = _wp_remove_block_attribute_object_markers( $parsed_anchor_block );
+
 	$markup = '';
 	foreach ( $hooked_block_types as $hooked_block_type ) {
 		$parsed_hooked_block = array(
@@ -1047,7 +1050,7 @@ function insert_hooked_blocks( &$parsed_anchor_block, $relative_position, $hooke
 		 * @param WP_Block_Template|WP_Post|array $context             The block template, template part, post object,
 		 *                                                             or pattern that the anchor block belongs to.
 		 */
-		$parsed_hooked_block = apply_filters( 'hooked_block', $parsed_hooked_block, $hooked_block_type, $relative_position, $parsed_anchor_block, $context );
+		$parsed_hooked_block = apply_filters( 'hooked_block', $parsed_hooked_block, $hooked_block_type, $relative_position, $filtered_anchor_block, $context );
 
 		/**
 		 * Filters the parsed block array for a given hooked block.
@@ -1063,7 +1066,7 @@ function insert_hooked_blocks( &$parsed_anchor_block, $relative_position, $hooke
 		 * @param WP_Block_Template|WP_Post|array $context             The block template, template part, post object,
 		 *                                                             or pattern that the anchor block belongs to.
 		 */
-		$parsed_hooked_block = apply_filters( "hooked_block_{$hooked_block_type}", $parsed_hooked_block, $hooked_block_type, $relative_position, $parsed_anchor_block, $context );
+		$parsed_hooked_block = apply_filters( "hooked_block_{$hooked_block_type}", $parsed_hooked_block, $hooked_block_type, $relative_position, $filtered_anchor_block, $context );
 
 		if ( null === $parsed_hooked_block ) {
 			continue;
@@ -1109,6 +1112,9 @@ function set_ignored_hooked_blocks_metadata( &$parsed_anchor_block, $relative_po
 		return '';
 	}
 
+	// Filters receive the anchor block without the parser's internal object markers.
+	$filtered_anchor_block = _wp_remove_block_attribute_object_markers( $parsed_anchor_block );
+
 	foreach ( $hooked_block_types as $index => $hooked_block_type ) {
 		$parsed_hooked_block = array(
 			'blockName'    => $hooked_block_type,
@@ -1118,10 +1124,10 @@ function set_ignored_hooked_blocks_metadata( &$parsed_anchor_block, $relative_po
 		);
 
 		/** This filter is documented in wp-includes/blocks.php */
-		$parsed_hooked_block = apply_filters( 'hooked_block', $parsed_hooked_block, $hooked_block_type, $relative_position, $parsed_anchor_block, $context );
+		$parsed_hooked_block = apply_filters( 'hooked_block', $parsed_hooked_block, $hooked_block_type, $relative_position, $filtered_anchor_block, $context );
 
 		/** This filter is documented in wp-includes/blocks.php */
-		$parsed_hooked_block = apply_filters( "hooked_block_{$hooked_block_type}", $parsed_hooked_block, $hooked_block_type, $relative_position, $parsed_anchor_block, $context );
+		$parsed_hooked_block = apply_filters( "hooked_block_{$hooked_block_type}", $parsed_hooked_block, $hooked_block_type, $relative_position, $filtered_anchor_block, $context );
 
 		if ( null === $parsed_hooked_block ) {
 			unset( $hooked_block_types[ $index ] );
@@ -1238,7 +1244,10 @@ function apply_block_hooks_to_content( $content, $context = null, $callback = 'i
 	};
 	add_filter( 'hooked_block_types', $suppress_single_instance_blocks, PHP_INT_MAX );
 	$content = traverse_and_serialize_blocks(
-		parse_blocks( $content ),
+		parse_blocks(
+			$content,
+			array( 'preserve_object_attribute_types' => true )
+		),
 		$before_block_visitor,
 		$after_block_visitor
 	);
@@ -1697,12 +1706,19 @@ function make_after_block_visitor( $hooked_blocks, $context, $callback = 'insert
  * the serializeAttributes JavaScript function in the block editor in order
  * to ensure consistent operation between PHP and JavaScript.
  *
+ * Attributes parsed with the `preserve_object_attribute_types` option (see
+ * {@see parse_blocks()}) are passed through {@see wp_restore_block_attribute_object_types()}
+ * first, so that values originating from a JSON object are re-encoded as `{}`/`{...}`
+ * rather than `[]`. For attributes parsed the default way this is a no-op.
+ *
  * @since 5.3.1
+ * @since 7.1.0 Restores object-typed attributes tagged by object-preserving parsing.
  *
  * @param array $block_attributes Attributes object.
  * @return string Serialized attributes.
  */
 function serialize_block_attributes( $block_attributes ) {
+	$block_attributes   = wp_restore_block_attribute_object_types( $block_attributes );
 	$encoded_attributes = wp_json_encode( $block_attributes, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 
 	return strtr(
@@ -2125,7 +2141,10 @@ function filter_block_content( $text, $allowed_html = 'post', $allowed_protocols
 		$text = preg_replace_callback( '%<!--(.*?)--->%', '_filter_block_content_callback', $text );
 	}
 
-	$blocks = parse_blocks( $text );
+	$blocks = parse_blocks(
+		$text,
+		array( 'preserve_object_attribute_types' => true )
+	);
 	foreach ( $blocks as $block ) {
 		$block   = filter_block_kses( $block, $allowed_html, $allowed_protocols );
 		$result .= serialize_block( $block );
@@ -2529,8 +2548,29 @@ function render_block( $parsed_block ) {
  * instead, as it provides a streaming and low-overhead interface for finding blocks.
  *
  * @since 5.0.0
+ * @since 7.1.0 Added the `$options` parameter.
  *
  * @param string $content Post content.
+ * @param array  $options {
+ *     Optional. Options controlling how block attributes are parsed. Default empty array.
+ *
+ *     @type bool $preserve_object_attribute_types Whether an attribute value that came from a JSON
+ *                                                 object should re-encode as an object rather than as
+ *                                                 an array. `json_decode( ..., true )` erases the
+ *                                                 distinction for two shapes: an empty object, which
+ *                                                 becomes `[]`, and an object whose keys form a
+ *                                                 `0..n-1` list, which becomes a JSON array. When
+ *                                                 enabled, values that originated from a JSON object
+ *                                                 are tagged with an internal marker (see
+ *                                                 WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER). Such
+ *                                                 tagged attributes are NOT plain data: callers MUST
+ *                                                 pass them through {@see serialize_block_attributes()}
+ *                                                 (done automatically when serializing a block) or
+ *                                                 {@see wp_restore_block_attribute_object_types()}
+ *                                                 before reading, comparing, iterating, or re-encoding
+ *                                                 them. Default false (historical behavior; objects and
+ *                                                 arrays both decode to arrays).
+ * }
  * @return array[] {
  *     Array of block structures.
  *
@@ -2547,7 +2587,7 @@ function render_block( $parsed_block ) {
  *     }
  * }
  */
-function parse_blocks( $content ) {
+function parse_blocks( $content, $options = array() ) {
 	/**
 	 * Filter to allow plugins to replace the server-side block parser.
 	 *
@@ -2558,7 +2598,63 @@ function parse_blocks( $content ) {
 	$parser_class = apply_filters( 'block_parser_class', 'WP_Block_Parser' );
 
 	$parser = new $parser_class();
-	return $parser->parse( $content );
+	return $parser->parse( $content, $options );
+}
+
+/**
+ * Restores object-typed block attributes tagged during object-preserving parsing.
+ *
+ * When `parse_blocks()` is called with the `preserve_object_attribute_types`
+ * option, attribute values that came from a JSON object are returned as PHP
+ * arrays carrying an internal marker key (WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER).
+ * This function is the required counterpart: it recursively strips that marker and
+ * re-casts each tagged array back to an object, so that `wp_json_encode()` emits
+ * `{}`/`{...}` for objects and `[]`/`[...]` for arrays.
+ *
+ * It is called automatically by {@see serialize_block_attributes()}, so blocks
+ * serialized through {@see serialize_block()} never expose the marker. Code that
+ * parses with the option and then inspects attributes directly (reading, iterating,
+ * comparing, or re-encoding) must call this first to avoid observing the marker.
+ *
+ * On attributes parsed the default way (no marker) this is a structural no-op, so
+ * the standard render/serialize path is byte-for-byte unchanged.
+ *
+ * @since 7.1.0
+ *
+ * @param mixed $value A parsed attribute value.
+ * @return mixed The value with object types restored.
+ */
+function wp_restore_block_attribute_object_types( $value ) {
+	$restored = WP_Block_Parser::rewrite_object_markers( $value, /* recast */ true );
+
+	return null === $restored ? $value : $restored;
+}
+
+/**
+ * Returns a parsed block whose attributes carry no internal object markers.
+ *
+ * The Block Hooks algorithm parses with object preservation enabled, so an anchor block
+ * handed to a third-party filter would otherwise expose the marker. Removing it without
+ * re-casting to objects gives filters exactly the attribute shape they would see on the
+ * default parse path, which is also the shape they saw before object preservation existed.
+ *
+ * @since 7.1.0
+ * @access private
+ *
+ * @param array $parsed_block A block, in parsed block array format.
+ * @return array The block with marker-free attributes.
+ */
+function _wp_remove_block_attribute_object_markers( $parsed_block ) {
+	if ( empty( $parsed_block['attrs'] ) || ! is_array( $parsed_block['attrs'] ) ) {
+		return $parsed_block;
+	}
+
+	$stripped = WP_Block_Parser::rewrite_object_markers( $parsed_block['attrs'], /* recast */ false );
+	if ( null !== $stripped ) {
+		$parsed_block['attrs'] = $stripped;
+	}
+
+	return $parsed_block;
 }
 
 /**

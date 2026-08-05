@@ -114,4 +114,98 @@ class Tests_Blocks_wpBlockParser extends WP_UnitTestCase {
 	protected function strip_r( $input ) {
 		return str_replace( "\r", '', $input );
 	}
+
+	/**
+	 * By default (no options), JSON objects and arrays both decode to plain
+	 * arrays and no object marker is added. This is the historical behavior.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse
+	 */
+	public function test_parse_does_not_tag_object_types_by_default() {
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse( '<!-- wp:test {"object":{},"array":[]} /-->' );
+
+		$attrs = $blocks[0]['attrs'];
+
+		$this->assertSame( array(), $attrs['object'], 'Empty object should decode to an empty array by default.' );
+		$this->assertSame( array(), $attrs['array'], 'Empty array should decode to an empty array.' );
+		$this->assertStringNotContainsString(
+			WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER,
+			wp_json_encode( $blocks ),
+			'No object marker should be present on the default parse path.'
+		);
+	}
+
+	/**
+	 * With the `preserve_object_attribute_types` option, a value that came from a
+	 * JSON object re-encodes as an object and a value that came from a JSON array
+	 * re-encodes as an array, empty ones included.
+	 *
+	 * Asserted through serialize_block_attributes(), which is the contract callers
+	 * rely on. How the parser carries the distinction in between is an
+	 * implementation detail and deliberately not asserted here.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse
+	 */
+	public function test_parse_preserves_object_types_when_option_is_set() {
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse(
+			'<!-- wp:test {"object":{"x":1},"array":[1,2],"emptyObject":{},"emptyArray":[]} /-->',
+			array( 'preserve_object_attribute_types' => true )
+		);
+
+		$this->assertSame(
+			'{"object":{"x":1},"array":[1,2],"emptyObject":{},"emptyArray":[]}',
+			serialize_block_attributes( $blocks[0]['attrs'] )
+		);
+	}
+
+	/**
+	 * Invalid attribute JSON yields null attributes on the object-preserving
+	 * path, matching the default json_decode() behavior.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse
+	 */
+	public function test_parse_with_option_returns_null_for_invalid_attribute_json() {
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse(
+			'<!-- wp:test {"invalid} /-->',
+			array( 'preserve_object_attribute_types' => true )
+		);
+
+		$this->assertNull( $blocks[0]['attrs'] );
+	}
+
+	/**
+	 * Tagging must never write over a key the block author already supplied, on the
+	 * object-preserving path either. Skipping the tag is safe: an object containing
+	 * the marker key has a non-numeric key and so re-encodes as an object regardless.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::parse
+	 */
+	public function test_parse_with_option_does_not_clobber_author_supplied_marker_key() {
+		$marker = WP_Block_Parser::OBJECT_ATTRIBUTE_MARKER;
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse(
+			'<!-- wp:test {"cfg":{"' . $marker . '":true,"label":"Buy now"}} /-->',
+			array( 'preserve_object_attribute_types' => true )
+		);
+
+		$this->assertSame(
+			array(
+				$marker => true,
+				'label' => 'Buy now',
+			),
+			$blocks[0]['attrs']['cfg'],
+			'The author value stored under the marker key must survive tagging.'
+		);
+	}
 }

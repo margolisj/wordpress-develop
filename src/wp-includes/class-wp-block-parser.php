@@ -15,6 +15,49 @@
  */
 class WP_Block_Parser {
 	/**
+	 * Hidden marker key appended to every associative array that originated
+	 * from a JSON *object*. It lets serialize_block_attributes() re-cast the
+	 * array back to an object, preserving the `{}` vs `[]` distinction that
+	 * PHP otherwise loses for empty (and numeric-keyed) values.
+	 *
+	 * Only added when the `preserve_object_attribute_types` parse option is
+	 * set; the default parse path is unaffected.
+	 *
+	 * @since 7.1.0
+	 * @var string
+	 */
+	const OBJECT_ATTRIBUTE_MARKER = '__wpBlockAttributeIsObject';
+
+	/**
+	 * Sentinel stored under self::OBJECT_ATTRIBUTE_MARKER.
+	 *
+	 * @since 7.1.0
+	 * @var stdClass|null
+	 */
+	private static $object_attribute_marker_value = null;
+
+	/**
+	 * Whether any parse in this request has tagged an object attribute.
+	 *
+	 * Markers only ever come from self::preserve_object_types(), so while this is
+	 * false no attribute anywhere can carry one and self::rewrite_object_markers()
+	 * has nothing to find. It only ever goes from false to true, so a stale value
+	 * can cost a pointless walk but can never skip a needed one.
+	 *
+	 * @since 7.1.0
+	 * @var bool
+	 */
+	private static $has_tagged_object_attributes = false;
+
+	/**
+	 * Options supplied to the most recent parse() call.
+	 *
+	 * @since 7.1.0
+	 * @var array
+	 */
+	private $options = array();
+
+	/**
 	 * Input document being parsed
 	 *
 	 * @example "Pre-text\n<!-- wp:paragraph -->This is inside a block!<!-- /wp:paragraph -->"
@@ -56,12 +99,17 @@ class WP_Block_Parser {
 	 * return an error on invalid inputs.
 	 *
 	 * @since 5.0.0
+	 * @since 7.1.0 Added the `$options` parameter.
 	 *
 	 * @param string $document Input document being parsed.
+	 * @param array  $options  Optional. Parse options. Supports the `preserve_object_attribute_types`
+	 *                         key; see {@see parse_blocks()} for its meaning and the contract for
+	 *                         consuming the resulting attributes. Default empty array.
 	 * @return array[]
 	 */
-	public function parse( $document ) {
+	public function parse( $document, $options = array() ) {
 		$this->document = $document;
+		$this->options  = $options;
 		$this->offset   = 0;
 		$this->output   = array();
 		$this->stack    = array();
@@ -277,7 +325,7 @@ class WP_Block_Parser {
 		 * are associative arrays. If we use `array()` we get a JSON `[]`
 		 */
 		$attrs = $has_attrs
-			? json_decode( $matches['attrs'][0], /* as-associative */ true )
+			? $this->parse_block_attributes( $matches['attrs'][0] )
 			: array();
 
 		/*
@@ -386,6 +434,163 @@ class WP_Block_Parser {
 		}
 
 		$this->output[] = (array) $stack_top->block;
+	}
+
+	/**
+	 * Returns the sentinel stored under self::OBJECT_ATTRIBUTE_MARKER.
+	 *
+	 * A shared object instance is used rather than a scalar so that the marker is
+	 * recognized by identity. json_decode() cannot produce this instance, so no
+	 * attribute value supplied by a block author can be mistaken for a marker,
+	 * whatever its key name or contents. That matters because restoration runs on
+	 * every serialize_block_attributes() call, including the default parse path
+	 * where no marker is ever set.
+	 *
+	 * The sentinel is never handed out: callers ask self::rewrite_object_markers()
+	 * to act on it instead, so it cannot be stored, copied, or forged.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @return stdClass The marker sentinel.
+	 */
+	private static function object_attribute_marker() {
+		if ( null === self::$object_attribute_marker_value ) {
+			self::$object_attribute_marker_value = new stdClass();
+		}
+
+		return self::$object_attribute_marker_value;
+	}
+
+	/**
+	 * Rewrites a parsed attribute value that may carry self::OBJECT_ATTRIBUTE_MARKER.
+	 *
+	 * Returns null when no marker was found anywhere in `$value`, which lets callers keep
+	 * the array they already have instead of paying for a rebuilt copy. That is the case
+	 * for every attribute parsed the default way -- the overwhelming majority of calls,
+	 * since {@see serialize_block_attributes()} runs this on every serialization.
+	 *
+	 * Requests that never parse with `preserve_object_attribute_types` skip the traversal
+	 * outright, so callers such as {@see WP_REST_Block_Patterns_Controller}, which
+	 * serialize every registered pattern, pay nothing for a feature they did not opt into.
+	 *
+	 * @since 7.1.0
+	 * @access private
+	 *
+	 * @param mixed $value  A parsed attribute value.
+	 * @param bool  $recast Whether tagged arrays should be re-cast to objects. When false the
+	 *                      markers are only removed, leaving the plain arrays that the default
+	 *                      parse path would have produced.
+	 * @return mixed|null The rewritten value, or null when there was nothing to rewrite.
+	 */
+	public static function rewrite_object_markers( $value, $recast ) {
+		if ( ! self::$has_tagged_object_attributes || ! is_array( $value ) ) {
+			return null;
+		}
+
+		/*
+		 * Only treat the marker as ours when it holds the parser's own sentinel
+		 * instance. Comparing by identity rather than by value means a genuine
+		 * attribute that happens to share the key name is always left untouched,
+		 * whatever it contains: json_decode() cannot produce that instance. This
+		 * runs on every serialize_block_attributes() call, including the default
+		 * parse path, so the check has to be exact.
+		 */
+		$is_tagged = array_key_exists( self::OBJECT_ATTRIBUTE_MARKER, $value )
+			&& self::object_attribute_marker() === $value[ self::OBJECT_ATTRIBUTE_MARKER ];
+		$changed   = $is_tagged;
+
+		foreach ( $value as $key => $child ) {
+			if ( ! is_array( $child ) ) {
+				continue; // Only an array can carry a marker, so scalars need no visit.
+			}
+
+			$rewritten = self::rewrite_object_markers( $child, $recast );
+			if ( null !== $rewritten ) {
+				$value[ $key ] = $rewritten;
+				$changed       = true;
+			}
+		}
+
+		if ( ! $changed ) {
+			return null;
+		}
+
+		if ( $is_tagged ) {
+			unset( $value[ self::OBJECT_ATTRIBUTE_MARKER ] );
+		}
+
+		return $is_tagged && $recast ? (object) $value : $value;
+	}
+
+	/**
+	 * Decodes a block's attribute JSON, optionally preserving the
+	 * array-vs-object distinction that plain json_decode(..., true) erases.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param string $json Raw attribute JSON from the block delimiter.
+	 * @return array|null Decoded attributes, or null on invalid JSON.
+	 */
+	private function parse_block_attributes( $json ) {
+		if ( empty( $this->options['preserve_object_attribute_types'] ) ) {
+			// Default (historical) behavior: objects and arrays both decode to arrays.
+			return json_decode( $json, /* associative */ true );
+		}
+
+		/*
+		 * Object-preserving decode. Each nested object is tagged so that
+		 * serialize_block_attributes() can restore it to an object. The
+		 * top-level attribute container is intentionally NOT tagged, so empty
+		 * top-level attributes keep being dropped on serialization, as before.
+		 */
+		$decoded = json_decode( $json, /* associative */ false );
+		if ( null === $decoded ) {
+			return null;
+		}
+
+		return self::preserve_object_types( $decoded, true );
+	}
+
+	/**
+	 * Recursively converts a json_decode(..., false) result into arrays,
+	 * tagging every value that came from a JSON object with
+	 * self::OBJECT_ATTRIBUTE_MARKER so the type can be restored on serialize.
+	 *
+	 * @since 7.1.0
+	 *
+	 * @param mixed $data              Decoded value (stdClass, array, or scalar).
+	 * @param bool  $is_attribute_root Whether $data is the top-level attribute
+	 *                                 container (which is never tagged).
+	 * @return mixed Array (tagged when from an object) or scalar.
+	 */
+	private static function preserve_object_types( $data, $is_attribute_root = false ) {
+		if ( $data instanceof stdClass ) {
+			$array = array();
+			foreach ( get_object_vars( $data ) as $key => $value ) {
+				$array[ $key ] = self::preserve_object_types( $value );
+			}
+			/*
+			 * Never write over a key the block author supplied: that would destroy
+			 * their value. Leaving such an object untagged is always correct, because
+			 * an object containing the marker key necessarily has a non-numeric key
+			 * and therefore re-encodes as a JSON object without any help.
+			 */
+			if ( ! $is_attribute_root && ! array_key_exists( self::OBJECT_ATTRIBUTE_MARKER, $array ) ) {
+				$array[ self::OBJECT_ATTRIBUTE_MARKER ] = self::object_attribute_marker();
+				self::$has_tagged_object_attributes     = true;
+			}
+			return $array;
+		}
+
+		if ( is_array( $data ) ) {
+			$array = array();
+			foreach ( $data as $key => $value ) {
+				$array[ $key ] = self::preserve_object_types( $value );
+			}
+			return $array; // No marker: a JSON array stays an array.
+		}
+
+		return $data; // Scalars and null pass through unchanged.
 	}
 }
 
