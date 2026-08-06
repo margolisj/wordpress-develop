@@ -49,6 +49,42 @@ class WP_Block_Parser {
 	public $stack;
 
 	/**
+	 * Capture group holding the `/` that marks a block closer.
+	 *
+	 * @see WP_Block_Parser::next_token()
+	 *
+	 * @since 7.1.0
+	 */
+	private const TOKEN_CLOSER = 1;
+
+	/**
+	 * Capture group holding the block name, including its namespace if it has one.
+	 *
+	 * @see WP_Block_Parser::next_token()
+	 *
+	 * @since 7.1.0
+	 */
+	private const TOKEN_NAME = 2;
+
+	/**
+	 * Capture group holding the attribute JSON, including its trailing whitespace.
+	 *
+	 * @see WP_Block_Parser::next_token()
+	 *
+	 * @since 7.1.0
+	 */
+	private const TOKEN_ATTRS = 3;
+
+	/**
+	 * Capture group holding the `/` that marks a void block.
+	 *
+	 * @see WP_Block_Parser::next_token()
+	 *
+	 * @since 7.1.0
+	 */
+	private const TOKEN_VOID = 4;
+
+	/**
 	 * Parses a document and returns a list of block structures
 	 *
 	 * When encountering an invalid parse will return a best-effort
@@ -243,9 +279,21 @@ class WP_Block_Parser {
 		 * block opener and a block closer is the leading `/` before `wp:` (and
 		 * a closer has no attributes). we can trap them both and process the
 		 * match back in PHP to see which one it was.
+		 *
+		 * The groups are numbered rather than named, and read back through the
+		 * TOKEN_* constants. PHP records a named group under both its name and
+		 * its number, and one string key is enough to turn $matches from a packed
+		 * array into a hash table, so naming the groups cost more here than the
+		 * matching did.
+		 *
+		 * The block name is one group rather than an optional namespace followed
+		 * by a name. Split in two, the engine matches the name as a namespace,
+		 * fails on the absent `/`, then rescans the same bytes as the name -- and
+		 * an unnamespaced `wp:paragraph` is the common case, so that rescan was
+		 * the rule rather than the exception.
 		 */
 		$has_match = preg_match(
-			'/<!--\s+(?P<closer>\/)?wp:(?P<namespace>[a-z][a-z0-9_-]*\/)?(?P<name>[a-z][a-z0-9_-]*)\s+(?P<attrs>{(?:(?:[^}]+|}+(?=})|(?!}\s+\/?-->).)*+)?}\s+)?(?P<void>\/)?-->/s',
+			'/<!--\s+(\/)?wp:([a-z][a-z0-9_-]*(?:\/[a-z][a-z0-9_-]*)?)\s+({(?:(?:[^}]+|}+(?=})|(?!}\s+\/?-->).)*+)?}\s+)?(\/)?-->/s',
 			$this->document,
 			$matches,
 			PREG_OFFSET_CAPTURE,
@@ -265,19 +313,22 @@ class WP_Block_Parser {
 		list( $match, $started_at ) = $matches[0];
 
 		$length    = strlen( $match );
-		$is_closer = isset( $matches['closer'] ) && -1 !== $matches['closer'][1];
-		$is_void   = isset( $matches['void'] ) && -1 !== $matches['void'][1];
-		$namespace = $matches['namespace'];
-		$namespace = ( isset( $namespace ) && -1 !== $namespace[1] ) ? $namespace[0] : 'core/';
-		$name      = $namespace . $matches['name'][0];
-		$has_attrs = isset( $matches['attrs'] ) && -1 !== $matches['attrs'][1];
+		$is_closer = -1 !== $matches[ self::TOKEN_CLOSER ][1];
+		$is_void   = isset( $matches[ self::TOKEN_VOID ] ) && -1 !== $matches[ self::TOKEN_VOID ][1];
+		$has_attrs = isset( $matches[ self::TOKEN_ATTRS ] ) && -1 !== $matches[ self::TOKEN_ATTRS ][1];
+
+		// A name that carries no namespace of its own belongs to core.
+		$name = $matches[ self::TOKEN_NAME ][0];
+		if ( false === strpos( $name, '/' ) ) {
+			$name = 'core/' . $name;
+		}
 
 		/*
 		 * Fun fact! It's not trivial in PHP to create "an empty associative array" since all arrays
 		 * are associative arrays. If we use `array()` we get a JSON `[]`
 		 */
 		$attrs = $has_attrs
-			? json_decode( $matches['attrs'][0], /* as-associative */ true )
+			? json_decode( $matches[ self::TOKEN_ATTRS ][0], /* as-associative */ true )
 			: array();
 
 		/*

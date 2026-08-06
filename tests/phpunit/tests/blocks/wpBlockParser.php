@@ -75,6 +75,85 @@ class Tests_Blocks_wpBlockParser extends WP_UnitTestCase {
 	}
 
 	/**
+	 * A block name carries its namespace, and one without a namespace belongs to core.
+	 *
+	 * The fixtures cover `core/` both spelled out and left implicit, but nothing
+	 * covers a namespace belonging to anyone else.
+	 *
+	 * @ticket 63325
+	 *
+	 * @dataProvider data_block_names
+	 *
+	 * @covers ::parse
+	 *
+	 * @param string $document Input document.
+	 * @param string $expected Expected parsed block name.
+	 */
+	public function test_parse_resolves_block_names( $document, $expected ) {
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse( $document );
+
+		$this->assertSame( $expected, $blocks[0]['blockName'] );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public function data_block_names() {
+		return array(
+			'no namespace'                => array( '<!-- wp:paragraph /-->', 'core/paragraph' ),
+			'core spelled out'            => array( '<!-- wp:core/paragraph /-->', 'core/paragraph' ),
+			'third party namespace'       => array( '<!-- wp:my-plugin/my-block /-->', 'my-plugin/my-block' ),
+			'namespace with digits'       => array( '<!-- wp:plugin2/block3 /-->', 'plugin2/block3' ),
+			'underscores'                 => array( '<!-- wp:my_plugin/my_block /-->', 'my_plugin/my_block' ),
+			'namespaced with attributes'  => array( '<!-- wp:my-plugin/my-block {"a":1} /-->', 'my-plugin/my-block' ),
+			'namespaced opener'           => array( '<!-- wp:my-plugin/my-block -->x<!-- /wp:my-plugin/my-block -->', 'my-plugin/my-block' ),
+			'unnamespaced opener'         => array( '<!-- wp:paragraph -->x<!-- /wp:paragraph -->', 'core/paragraph' ),
+			'single character name'       => array( '<!-- wp:a /-->', 'core/a' ),
+			'single character namespaced' => array( '<!-- wp:a/b /-->', 'a/b' ),
+		);
+	}
+
+	/**
+	 * A name the delimiter grammar does not allow is not a block at all.
+	 *
+	 * @ticket 63325
+	 *
+	 * @dataProvider data_invalid_block_names
+	 *
+	 * @covers ::parse
+	 *
+	 * @param string $document Input document.
+	 */
+	public function test_parse_rejects_invalid_block_names( $document ) {
+		$parser = new WP_Block_Parser();
+		$blocks = $parser->parse( $document );
+
+		$this->assertCount( 1, $blocks, 'The document should parse as a single freeform block.' );
+		$this->assertNull( $blocks[0]['blockName'], 'Invalid delimiters are freeform content, not blocks.' );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public function data_invalid_block_names() {
+		return array(
+			'uppercase'           => array( '<!-- wp:Paragraph /-->' ),
+			'leading digit'       => array( '<!-- wp:9lives /-->' ),
+			'empty name'          => array( '<!-- wp: /-->' ),
+			'leading hyphen'      => array( '<!-- wp:-block /-->' ),
+			'three segments'      => array( '<!-- wp:a/b/c /-->' ),
+			'trailing slash'      => array( '<!-- wp:block/ /-->' ),
+			'namespace only'      => array( '<!-- wp:/block /-->' ),
+			'no space before -->' => array( '<!-- wp:paragraph-->' ),
+		);
+	}
+
+	/**
 	 * Helper function to remove relative paths and extension from a filename, leaving just the fixture name.
 	 *
 	 * @since 5.0.0
