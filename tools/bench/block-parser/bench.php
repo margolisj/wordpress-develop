@@ -13,11 +13,17 @@
  *   --no-verify    Skip the equivalence check. Use only when a variant is
  *                  deliberately expected to differ.
  *   --quick        Fewer rounds, for a fast signal while iterating.
+ *   --record=FILE  Append the run to FILE as one line of JSON.
  *
  * The first variant listed is the baseline every other one is compared against.
  *
  * Example:
  *   php bench.php base=HEAD cand=WORKING --corpus=attr-large,html-heavy
+ *
+ * A recorded run carries the resolved revisions, the PHP and PCRE build, and
+ * every median and interval, so a number can be traced back to what produced
+ * it. Timings are only comparable within one run: variants are interleaved
+ * against each other, not against a reading taken on another day.
  */
 
 require __DIR__ . '/harness.php';
@@ -25,11 +31,12 @@ require __DIR__ . '/corpora.php';
 
 $argv_rest = array_slice( $argv, 1 );
 $options   = array(
-	'rounds'  => 60,
-	'corpus'  => null,
-	'repo'    => null,
-	'verify'  => true,
+	'rounds'   => 60,
+	'corpus'   => null,
+	'repo'     => null,
+	'verify'   => true,
 	'preserve' => false,
+	'record'   => null,
 );
 $variants  = array();
 
@@ -46,6 +53,8 @@ foreach ( $argv_rest as $arg ) {
 		$options['corpus'] = explode( ',', $m[1] );
 	} elseif ( preg_match( '/^--repo=(.+)$/', $arg, $m ) ) {
 		$options['repo'] = $m[1];
+	} elseif ( preg_match( '/^--record=(.+)$/', $arg, $m ) ) {
+		$options['record'] = $m[1];
 	} elseif ( preg_match( '/^([A-Za-z0-9_.-]+)=(.+)$/', $arg, $m ) ) {
 		$variants[ $m[1] ] = $m[2];
 	} else {
@@ -190,6 +199,8 @@ if ( count( $labels ) > 1 ) {
 }
 echo "\n";
 
+$recorded = array();
+
 foreach ( $corpora as $name => $document ) {
 	$block_count = count( bench_parse( $classes[ $baseline ], $document, $parse_options ) );
 
@@ -205,9 +216,19 @@ foreach ( $corpora as $name => $document ) {
 
 	printf( '%-14s %6.1f %10d', $name, strlen( $document ) / 1024, $block_count );
 
+	$row = array(
+		'bytes'   => strlen( $document ),
+		'blocks'  => $block_count,
+		'inner'   => $inner,
+		'medians' => array(),
+		'change'  => array(),
+	);
+
 	foreach ( $labels as $label ) {
 		$median = bench_percentile( $samples[ $label ], 0.5 );
 		$totals[ $label ] += $median;
+
+		$row['medians'][ $label ] = round( $median, 2 );
 		printf( ' %14s', trim( bench_format_ns( $median ) ) );
 	}
 
@@ -219,6 +240,13 @@ foreach ( $corpora as $name => $document ) {
 			// A CI that straddles zero means the run cannot separate the two.
 			$significant = ( $ci['low_pct'] > 0 && $ci['high_pct'] > 0 )
 				|| ( $ci['low_pct'] < 0 && $ci['high_pct'] < 0 );
+
+			$row['change'][ $label ] = array(
+				'median_pct'  => round( $ci['median_pct'], 2 ),
+				'low_pct'     => round( $ci['low_pct'], 2 ),
+				'high_pct'    => round( $ci['high_pct'], 2 ),
+				'significant' => $significant,
+			);
 
 			$color = '0';
 			if ( $significant ) {
@@ -238,9 +266,12 @@ foreach ( $corpora as $name => $document ) {
 	}
 
 	// Noise floor: how much the baseline varied against itself this round.
-	$mad    = bench_mad( $samples[ $baseline ] );
-	$median = bench_percentile( $samples[ $baseline ], 0.5 );
-	printf( "   (noise +/-%.1f%%)", $median > 0 ? ( $mad / $median ) * 100 : 0 );
+	$mad          = bench_mad( $samples[ $baseline ] );
+	$median       = bench_percentile( $samples[ $baseline ], 0.5 );
+	$row['noise'] = round( $median > 0 ? ( $mad / $median ) * 100 : 0, 2 );
+	printf( "   (noise +/-%.1f%%)", $row['noise'] );
+
+	$recorded[ $name ] = $row;
 
 	echo "\n";
 }
@@ -259,3 +290,38 @@ if ( count( $labels ) > 1 ) {
 }
 echo "\n";
 echo "\n'ns' marks a change the run could not separate from noise.\n";
+
+if ( null !== $options['record'] ) {
+	$run = array(
+		'at'          => gmdate( 'c' ),
+		'environment' => bench_environment(),
+		'mode'        => $options['preserve'] ? 'preserve_empty_object_attributes' : 'default',
+		'rounds'      => $options['rounds'],
+		'baseline'    => $baseline,
+		'variants'    => $resolved,
+		// Null rather than true when the check was skipped: not asked is not passed.
+		'equivalent'  => $options['verify'] ? empty( $mismatches ) : null,
+		'mismatches'  => $mismatches,
+		'corpora'     => $recorded,
+		'sums'        => array_map(
+			static function ( $total ) {
+				return round( $total, 2 );
+			},
+			$totals
+		),
+	);
+
+	// One run per line, so results append without rewriting what came before.
+	$written = file_put_contents(
+		$options['record'],
+		json_encode( $run, JSON_UNESCAPED_SLASHES ) . "\n",
+		FILE_APPEND
+	);
+
+	if ( false === $written ) {
+		fwrite( STDERR, "Could not write to {$options['record']}\n" );
+		exit( 1 );
+	}
+
+	printf( "recorded to %s\n", $options['record'] );
+}

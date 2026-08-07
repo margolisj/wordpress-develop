@@ -46,6 +46,7 @@ neither property. Run both -- a change worth making should hold under each.
 | `bench.php` | Is revision B faster than revision A, and by how much? |
 | `decompose.php` | Where does parse time actually go? |
 | `patterns.php` | Which tokenizer pattern is fastest, and do they agree? |
+| `summarize.php` | What did previous runs measure? |
 
 ### bench.php
 
@@ -58,6 +59,7 @@ php bench.php [options] <label>=<rev|path|WORKING> [<label>=<rev> ...]
   --repo=PATH    Repository root.
   --no-verify    Skip the equivalence check.
   --quick        Fewer rounds, for a fast signal while iterating.
+  --record=FILE  Append the run to FILE as one line of JSON.
 ```
 
 The first variant is the baseline. Before timing anything it parses every corpus
@@ -67,6 +69,32 @@ outputs differ -- a faster parser that parses differently is not a faster parser
 ```sh
 php bench.php trunk=trunk head=HEAD tok=WORKING --repo=/path/to/wordpress-develop
 ```
+
+### Reading the noise column
+
+Every row prints how much the baseline varied against itself during that run.
+That figure is the resolution of the run, and a difference smaller than it was
+not measured -- it was guessed at.
+
+A quiet machine gives 0.3% to 2%. If a row reports much more, something else was
+competing for the CPU; re-run rather than reporting the number. `summarize.php`
+flags any recorded run whose noise reached 3%.
+
+Absolute timings are comparable only WITHIN one run. Variants are interleaved
+against each other, never against a reading taken at another time, so the same
+document can differ several fold between runs on a busy versus an idle machine
+while the percentage between variants stays put.
+
+### summarize.php
+
+```sh
+php summarize.php [FILE] [--corpus=NAME] [--full]
+```
+
+Reads back `results.jsonl`. Each line records the resolved revisions, the PHP and
+PCRE build, whether the variants parsed identically, and every median and
+interval -- so a number quoted in a commit message can be traced to the run that
+produced it.
 
 ### decompose.php
 

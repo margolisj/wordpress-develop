@@ -265,25 +265,45 @@ function bench_format_ns( $ns ) {
 }
 
 /**
+ * Collects the environment facts that decide whether a regex benchmark means
+ * anything at all.
+ *
+ * Recorded alongside every result: a timing without its build is not a
+ * comparable number, since PCRE JIT and Xdebug each move these figures further
+ * than any change measured here.
+ *
+ * @return array
+ */
+function bench_environment() {
+	ob_start();
+	phpinfo( INFO_MODULES );
+	$info = ob_get_clean();
+
+	return array(
+		'php'      => PHP_VERSION,
+		'pcre'     => PCRE_VERSION,
+		'pcre_jit' => (bool) preg_match( '/PCRE JIT Support\s*=>\s*enabled/i', $info ),
+		'xdebug'   => extension_loaded( 'xdebug' ) ? ( ini_get( 'xdebug.mode' ) ?: 'loaded' ) : false,
+		'opcache'  => (bool) ( function_exists( 'opcache_get_status' ) && ini_get( 'opcache.enable_cli' ) ),
+		'os'       => PHP_OS_FAMILY,
+	);
+}
+
+/**
  * Prints the environment facts that decide whether a regex benchmark means
  * anything at all.
  */
 function bench_print_environment() {
-	$pcre_jit = false;
-	ob_start();
-	phpinfo( INFO_MODULES );
-	$info = ob_get_clean();
-	if ( preg_match( '/PCRE JIT Support\s*=>\s*enabled/i', $info ) ) {
-		$pcre_jit = true;
-	}
+	$env      = bench_environment();
+	$pcre_jit = $env['pcre_jit'];
 
 	printf(
 		"PHP %s | PCRE %s | PCRE JIT: %s | Xdebug: %s | OPcache: %s\n",
-		PHP_VERSION,
-		PCRE_VERSION,
+		$env['php'],
+		$env['pcre'],
 		$pcre_jit ? "\033[32mON\033[0m" : "\033[31mOFF\033[0m",
-		extension_loaded( 'xdebug' ) ? "\033[31mLOADED (mode=" . ini_get( 'xdebug.mode' ) . ")\033[0m" : 'absent',
-		( function_exists( 'opcache_get_status' ) && ini_get( 'opcache.enable_cli' ) ) ? 'on' : 'off'
+		false !== $env['xdebug'] ? "\033[31mLOADED (mode=" . $env['xdebug'] . ")\033[0m" : 'absent',
+		$env['opcache'] ? 'on' : 'off'
 	);
 
 	if ( ! $pcre_jit ) {
