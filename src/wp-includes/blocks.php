@@ -1965,6 +1965,7 @@ function traverse_and_serialize_block( $block, $pre_callback = null, $post_callb
  *
  * @since 6.6.0
  * @since 7.0.0 Adds metadata to attributes of single-pattern container blocks.
+ * @since 7.1.0 Pattern content is parsed keeping nested empty object attributes.
  *
  * @param array $blocks An array blocks.
  *
@@ -1979,7 +1980,12 @@ function resolve_pattern_blocks( $blocks ) {
 		if ( 'core/pattern' === $blocks[ $i ]['blockName'] ) {
 			$attrs = $blocks[ $i ]['attrs'];
 
-			if ( empty( $attrs['slug'] ) ) {
+			/*
+			 * The `is_string()` check keeps a preserved empty object out of the array
+			 * keys below, where a non-string offset is a fatal error. `empty()` stays
+			 * first so that a `'0'` slug is still skipped, as it always has been.
+			 */
+			if ( empty( $attrs['slug'] ) || ! is_string( $attrs['slug'] ) ) {
 				++$i;
 				continue;
 			}
@@ -2001,14 +2007,23 @@ function resolve_pattern_blocks( $blocks ) {
 				continue;
 			}
 
-			$blocks_to_insert = parse_blocks( trim( $pattern['content'] ) );
+			$blocks_to_insert = _wp_parse_blocks_preserving_empty_object_attributes( trim( $pattern['content'] ) );
 
 			/*
 			 * For single-root patterns, add the pattern name to make this a pattern instance in the editor.
 			 * If the pattern has metadata, merge it with the existing metadata.
 			 */
 			if ( count( $blocks_to_insert ) === 1 ) {
-				$block_metadata                = $blocks_to_insert[0]['attrs']['metadata'] ?? array();
+				/*
+				 * Merging rewrites this metadata, so it cannot keep a preserved empty
+				 * object: `patternName` alone means it is no longer empty. Convert first --
+				 * an array offset against an object is a fatal error, and the sanitize loop
+				 * below would pass one to sanitize_text_field().
+				 */
+				$block_metadata = _wp_block_attribute_empty_objects_to_arrays(
+					(array) ( $blocks_to_insert[0]['attrs']['metadata'] ?? array() )
+				);
+
 				$block_metadata['patternName'] = $slug;
 
 				/*

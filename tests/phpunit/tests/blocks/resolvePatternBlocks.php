@@ -87,6 +87,28 @@ class Tests_Blocks_ResolvePatternBlocks extends WP_UnitTestCase {
 				'categories'  => array( 'test' ),
 			)
 		);
+		register_block_pattern(
+			'core/empty-object-attrs',
+			array(
+				'title'   => 'Empty Object Attrs Pattern',
+				// Two roots, so that no metadata is merged in and the attributes stand alone.
+				'content' => '<!-- wp:paragraph {"style":{"spacing":{}}} -->One<!-- /wp:paragraph --><!-- wp:paragraph {"style":{"spacing":[]}} -->Two<!-- /wp:paragraph -->',
+			)
+		);
+		register_block_pattern(
+			'core/empty-metadata',
+			array(
+				'title'   => 'Empty Metadata Pattern',
+				'content' => '<!-- wp:paragraph {"metadata":{}} -->Empty metadata content<!-- /wp:paragraph -->',
+			)
+		);
+		register_block_pattern(
+			'core/empty-metadata-categories',
+			array(
+				'title'   => 'Empty Metadata Categories Pattern',
+				'content' => '<!-- wp:paragraph {"metadata":{"categories":{}}} -->Empty categories content<!-- /wp:paragraph -->',
+			)
+		);
 	}
 
 	public function tear_down() {
@@ -98,6 +120,9 @@ class Tests_Blocks_ResolvePatternBlocks extends WP_UnitTestCase {
 		unregister_block_pattern( 'core/nested-single' );
 		unregister_block_pattern( 'core/existing-metadata' );
 		unregister_block_pattern( 'core/with-custom-metadata' );
+		unregister_block_pattern( 'core/empty-object-attrs' );
+		unregister_block_pattern( 'core/empty-metadata' );
+		unregister_block_pattern( 'core/empty-metadata-categories' );
 		parent::tear_down();
 	}
 
@@ -171,6 +196,82 @@ class Tests_Blocks_ResolvePatternBlocks extends WP_UnitTestCase {
 				'<!-- wp:pattern {"slug":"core/with-custom-metadata"} /-->',
 				'<!-- wp:paragraph {"metadata":{"customKey":"customValue","anotherKey":123,"booleanKey":true,"patternName":"core/with-custom-metadata","name":"Pattern With Custom Metadata","description":"A pattern with custom metadata keys.","categories":["test"]}} -->Content with custom metadata<!-- /wp:paragraph -->',
 			),
+		);
+	}
+
+	/**
+	 * A pattern's own markup is its author's; resolving one must not rewrite the
+	 * empty objects in its attributes to empty arrays.
+	 *
+	 * @dataProvider data_should_keep_empty_object_attributes
+	 *
+	 * @ticket 63325
+	 *
+	 * @param string $blocks   A string representing blocks that need resolving.
+	 * @param string $expected Expected result.
+	 */
+	public function test_should_keep_empty_object_attributes( $blocks, $expected ) {
+		$actual = resolve_pattern_blocks( parse_blocks( $blocks ) );
+		$this->assertSame( $expected, serialize_blocks( $actual ) );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array
+	 */
+	public function data_should_keep_empty_object_attributes() {
+		return array(
+			'empty object in pattern content'  => array(
+				'<!-- wp:pattern {"slug":"core/empty-object-attrs"} /-->',
+				'<!-- wp:paragraph {"style":{"spacing":{}}} -->One<!-- /wp:paragraph --><!-- wp:paragraph {"style":{"spacing":[]}} -->Two<!-- /wp:paragraph -->',
+			),
+			// The merge fills this metadata in, so it is no longer empty and must not stay an object.
+			'empty metadata object is merged'  => array(
+				'<!-- wp:pattern {"slug":"core/empty-metadata"} /-->',
+				'<!-- wp:paragraph {"metadata":{"patternName":"core/empty-metadata","name":"Empty Metadata Pattern"}} -->Empty metadata content<!-- /wp:paragraph -->',
+			),
+			// An empty object inside the metadata reaches sanitize_text_field() as a value.
+			'empty object inside the metadata' => array(
+				'<!-- wp:pattern {"slug":"core/empty-metadata-categories"} /-->',
+				'<!-- wp:paragraph {"metadata":{"categories":[],"patternName":"core/empty-metadata-categories","name":"Empty Metadata Categories Pattern"}} -->Empty categories content<!-- /wp:paragraph -->',
+			),
+		);
+	}
+
+	/**
+	 * The REST controllers hand this function blocks parsed with empty object
+	 * preservation, so a preserved object can arrive in any attribute -- including
+	 * the slug, which is used as an array key.
+	 *
+	 * @ticket 63325
+	 */
+	public function test_should_tolerate_preserved_objects_from_the_caller() {
+		$markup = '<!-- wp:pattern {"slug":{}} /-->';
+
+		$actual = resolve_pattern_blocks(
+			_wp_parse_blocks_preserving_empty_object_attributes( $markup )
+		);
+
+		$this->assertSame( $markup, serialize_blocks( $actual ) );
+	}
+
+	/**
+	 * The whole point of the preserving parse: a document round-trips through
+	 * pattern resolution without its empty objects being rewritten.
+	 *
+	 * @ticket 63325
+	 */
+	public function test_should_round_trip_a_preserved_document() {
+		$markup = '<!-- wp:group {"style":{"spacing":{}}} --><!-- wp:pattern {"slug":"core/test"} /--><!-- /wp:group -->';
+
+		$actual = resolve_pattern_blocks(
+			_wp_parse_blocks_preserving_empty_object_attributes( $markup )
+		);
+
+		$this->assertSame(
+			'<!-- wp:group {"style":{"spacing":{}}} --><!-- wp:paragraph -->Hello<!-- /wp:paragraph --><!-- wp:paragraph -->World<!-- /wp:paragraph --><!-- /wp:group -->',
+			serialize_blocks( $actual )
 		);
 	}
 }

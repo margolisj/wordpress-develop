@@ -156,15 +156,21 @@ class WP_REST_Block_Patterns_Controller extends WP_REST_Controller {
 	 *
 	 * @since 6.0.0
 	 * @since 6.3.0 Added `source` property.
+	 * @since 7.1.0 Pattern content is parsed keeping nested empty object attributes.
 	 *
 	 * @param array           $item    Raw pattern as registered, before any changes.
 	 * @param WP_REST_Request $request Request object.
 	 * @return WP_REST_Response|WP_Error Response object on success, or WP_Error object on failure.
 	 */
 	public function prepare_item_for_response( $item, $request ) {
-		// Resolve pattern blocks so they don't need to be resolved client-side
-		// in the editor, improving performance.
-		$blocks          = parse_blocks( $item['content'] );
+		/*
+		 * Resolve pattern blocks so they don't need to be resolved client-side
+		 * in the editor, improving performance.
+		 *
+		 * The parse keeps nested empty object attributes so that reserializing below
+		 * returns the pattern's own markup rather than rewriting every `{}` to `[]`.
+		 */
+		$blocks          = _wp_parse_blocks_preserving_empty_object_attributes( $item['content'] );
 		$blocks          = resolve_pattern_blocks( $blocks );
 		$item['content'] = serialize_blocks( $blocks );
 

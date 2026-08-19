@@ -670,6 +670,7 @@ class WP_REST_Templates_Controller extends WP_REST_Controller {
 	 * @since 7.1.0 Added `date` property to the response.
 	 * @since 7.1.0 The `modified` property is `null` for templates that have no
 	 *              modification date.
+	 * @since 7.1.0 Template content is parsed keeping nested empty object attributes.
 	 *
 	 * @param WP_Block_Template $item    Template instance.
 	 * @param WP_REST_Request   $request Request object.
@@ -684,8 +685,11 @@ class WP_REST_Templates_Controller extends WP_REST_Controller {
 		/*
 		 * Resolve pattern blocks so they don't need to be resolved client-side
 		 * in the editor, improving performance.
+		 *
+		 * The parse keeps nested empty object attributes so that reserializing below
+		 * returns the template's own markup rather than rewriting every `{}` to `[]`.
 		 */
-		$blocks        = parse_blocks( $item->content );
+		$blocks        = _wp_parse_blocks_preserving_empty_object_attributes( $item->content );
 		$blocks        = resolve_pattern_blocks( $blocks );
 		$item->content = serialize_blocks( $blocks );
 

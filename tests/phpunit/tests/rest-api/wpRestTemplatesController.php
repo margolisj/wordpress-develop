@@ -315,6 +315,44 @@ class Tests_REST_WpRestTemplatesController extends WP_Test_REST_Controller_Testc
 	}
 
 	/**
+	 * The response reserializes the template, so the parse behind it has to keep an
+	 * empty object attribute rather than handing the editor back a rewritten
+	 * document.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers WP_REST_Templates_Controller::prepare_item_for_response
+	 */
+	public function test_get_item_keeps_empty_object_attributes() {
+		wp_set_current_user( self::$admin_id );
+
+		$content = '<!-- wp:paragraph {"style":{"spacing":{}}} --><p>Object</p><!-- /wp:paragraph --><!-- wp:paragraph {"style":{"spacing":[]}} --><p>Array</p><!-- /wp:paragraph -->';
+
+		$post = self::factory()->post->create_and_get(
+			array(
+				'post_type'    => 'wp_template',
+				'post_name'    => 'my_empty_object_template',
+				'post_title'   => 'My Empty Object Template',
+				'post_content' => $content,
+				'tax_input'    => array(
+					'wp_theme' => array( get_stylesheet() ),
+				),
+			)
+		);
+		wp_set_post_terms( $post->ID, get_stylesheet(), 'wp_theme' );
+
+		$request  = new WP_REST_Request( 'GET', '/wp/v2/templates/default//my_empty_object_template' );
+		$response = rest_get_server()->dispatch( $request );
+		$data     = $response->get_data();
+
+		$this->assertSame(
+			$content,
+			$data['content']['raw'],
+			'An empty object attribute should not be rewritten to an empty array'
+		);
+	}
+
+	/**
 	 * @ticket 56481
 	 *
 	 * @covers WP_REST_Templates_Controller::get_item

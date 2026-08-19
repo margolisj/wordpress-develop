@@ -102,6 +102,17 @@ class Tests_REST_WpRestBlockPatternsController extends WP_Test_REST_Controller_T
 				'source'     => 'pattern-directory/featured',
 			)
 		);
+
+		$test_registry->register(
+			'test/empty-object',
+			array(
+				'title'      => 'Pattern With An Empty Object',
+				// Two roots, so that no pattern metadata is merged into the attributes.
+				'content'    => '<!-- wp:paragraph {"style":{"spacing":{}}} --><p>Object</p><!-- /wp:paragraph --><!-- wp:paragraph {"style":{"spacing":[]}} --><p>Array</p><!-- /wp:paragraph -->',
+				'categories' => array( 'test' ),
+				'source'     => 'theme',
+			)
+		);
 	}
 
 	public static function wpTearDownAfterClass() {
@@ -159,6 +170,35 @@ class Tests_REST_WpRestBlockPatternsController extends WP_Test_REST_Controller_T
 			),
 			$data[1],
 			'WP_REST_Block_Patterns_Controller::get_items() should return test/two'
+		);
+	}
+
+	/**
+	 * Pattern content is registered markup, not something the REST layer may
+	 * rewrite. Resolving it must leave an empty object attribute as `{}`.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers WP_REST_Block_Patterns_Controller::prepare_item_for_response
+	 */
+	public function test_get_items_keeps_empty_object_attributes() {
+		wp_set_current_user( self::$admin_id );
+
+		$request            = new WP_REST_Request( 'GET', static::REQUEST_ROUTE );
+		$request['_fields'] = 'name,content';
+		$response           = rest_get_server()->dispatch( $request );
+
+		$patterns = wp_list_pluck( $response->get_data(), 'content', 'name' );
+
+		$this->assertArrayHasKey(
+			'test/empty-object',
+			$patterns,
+			'The pattern registered with an empty object attribute should be returned'
+		);
+		$this->assertSame(
+			'<!-- wp:paragraph {"style":{"spacing":{}}} --><p>Object</p><!-- /wp:paragraph --><!-- wp:paragraph {"style":{"spacing":[]}} --><p>Array</p><!-- /wp:paragraph -->',
+			$patterns['test/empty-object'],
+			'An empty object attribute should not be rewritten to an empty array'
 		);
 	}
 
