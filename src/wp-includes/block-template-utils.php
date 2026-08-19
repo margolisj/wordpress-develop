@@ -1474,6 +1474,7 @@ function wp_is_theme_directory_ignored( $path ) {
  *
  * @since 5.9.0
  * @since 6.0.0 Adds the whole theme to the export archive.
+ * @since 7.1.0 Template content is parsed keeping nested empty object attributes.
  *
  * @return WP_Error|string Path of the ZIP file or error on failure.
  */
@@ -1522,8 +1523,13 @@ function wp_generate_block_templates_export_file() {
 	// Load templates into the zip file.
 	$templates = get_block_templates();
 	foreach ( $templates as $template ) {
+		/*
+		 * The exported file is the template's own markup. Parse keeping nested empty
+		 * object attributes, so that reserializing here does not rewrite every `{}`
+		 * to `[]` on its way into the theme.
+		 */
 		$template->content = traverse_and_serialize_blocks(
-			parse_blocks( $template->content ),
+			_wp_parse_blocks_preserving_empty_object_attributes( $template->content ),
 			'_remove_theme_attribute_from_template_part_block'
 		);
 

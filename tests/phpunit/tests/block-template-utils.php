@@ -448,6 +448,45 @@ class Tests_Block_Template_Utils extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The exported file is the template's own markup, so the round trip through
+	 * traverse_and_serialize_blocks() must not rewrite an empty object attribute
+	 * into an empty array on its way into the theme.
+	 *
+	 * @ticket 63325
+	 * @requires extension zip
+	 */
+	public function test_wp_generate_block_templates_export_file_keeps_empty_object_attributes() {
+		$content = '<!-- wp:paragraph {"style":{"spacing":{}}} --><p>Object</p><!-- /wp:paragraph --><!-- wp:paragraph {"style":{"spacing":[]}} --><p>Array</p><!-- /wp:paragraph -->';
+
+		$post = self::factory()->post->create_and_get(
+			array(
+				'post_type'    => 'wp_template',
+				'post_name'    => 'empty_object_template',
+				'post_title'   => 'Empty Object Template',
+				'post_content' => $content,
+				'tax_input'    => array(
+					'wp_theme' => array( self::TEST_THEME ),
+				),
+			)
+		);
+		wp_set_post_terms( $post->ID, self::TEST_THEME, 'wp_theme' );
+
+		$filename = wp_generate_block_templates_export_file();
+
+		$zip = new ZipArchive();
+		$zip->open( $filename );
+		$exported = $zip->getFromName( 'templates/empty_object_template.html' );
+		$zip->close();
+		unlink( $filename );
+
+		$this->assertSame(
+			$content,
+			$exported,
+			'An empty object attribute should not be rewritten to an empty array on export'
+		);
+	}
+
+	/**
 	 * Should generate block templates export file.
 	 *
 	 * @ticket 54448
