@@ -48,6 +48,10 @@ neither property. Run both -- a change worth making should hold under each.
 | `patterns.php` | Which tokenizer pattern is fastest, and do they agree? |
 | `summarize.php` | What did previous runs measure? |
 
+See [FINDINGS.md](FINDINGS.md) for what these have already established: where the
+parser's time goes today, what was changed, and what was measured and rejected --
+including the one remaining 5% and why it was left on the table.
+
 ### bench.php
 
 ```
