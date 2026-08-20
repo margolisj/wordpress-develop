@@ -1025,6 +1025,20 @@ function insert_hooked_blocks( &$parsed_anchor_block, $relative_position, $hooke
 	 */
 	$hooked_block_types = apply_filters( 'hooked_block_types', $hooked_block_types, $relative_position, $anchor_block_type, $context );
 
+	$markup = '';
+
+	/*
+	 * Most blocks have no hooked blocks at all, and everything below only reads from the
+	 * anchor block, so there is no work left to do once the list is empty. Returning here
+	 * skips a recursive copy of the anchor block's attributes for every one of them.
+	 *
+	 * This has to come after the `hooked_block_types` filter rather than before it, because
+	 * a plugin may add a hooked block type to an anchor that has none registered statically.
+	 */
+	if ( empty( $hooked_block_types ) ) {
+		return $markup;
+	}
+
 	// Filters have always received the anchor block with array-shaped attributes throughout.
 	$filtered_anchor_block = _wp_get_block_hooks_filter_anchor_block( $parsed_anchor_block );
 
@@ -1037,7 +1051,6 @@ function insert_hooked_blocks( &$parsed_anchor_block, $relative_position, $hooke
 	$anchor_metadata       = (array) ( $parsed_anchor_block['attrs']['metadata'] ?? array() );
 	$ignored_hooked_blocks = (array) ( $anchor_metadata['ignoredHookedBlocks'] ?? array() );
 
-	$markup = '';
 	foreach ( $hooked_block_types as $hooked_block_type ) {
 		$parsed_hooked_block = array(
 			'blockName'    => $hooked_block_type,

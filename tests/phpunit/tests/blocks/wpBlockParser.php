@@ -159,6 +159,100 @@ class Tests_Blocks_wpBlockParser extends WP_UnitTestCase {
 	}
 
 	/**
+	 * An empty object written with whitespace between the braces is still an empty object.
+	 *
+	 * The preserving path is gated on finding a `{}` token, so the gate has to accept every
+	 * whitespace form JSON permits there rather than only the two-character sequence that
+	 * `JSON.stringify()` happens to emit.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::_wp_parse_blocks_preserving_empty_object_attributes
+	 *
+	 * @dataProvider data_empty_object_whitespace
+	 *
+	 * @param string $empty_object An empty JSON object, possibly containing whitespace.
+	 */
+	public function test_preserving_parse_accepts_json_whitespace_in_empty_objects( $empty_object ) {
+		$attrs = $this->parse_attrs_preserving( '<!-- wp:test {"object":' . $empty_object . '} /-->' );
+
+		$this->assertInstanceOf( 'stdClass', $attrs['object'] );
+		$this->assertSame( array(), get_object_vars( $attrs['object'] ) );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public function data_empty_object_whitespace() {
+		return array(
+			'no whitespace'   => array( '{}' ),
+			'space'           => array( '{ }' ),
+			'tab'             => array( "{\t}" ),
+			'line feed'       => array( "{\n}" ),
+			'carriage return' => array( "{\r}" ),
+			'all of them'     => array( "{ \t\r\n }" ),
+		);
+	}
+
+	/**
+	 * A `{}` sequence inside a string value must not change the parsed result.
+	 *
+	 * The gate on the preserving path is lexical, so markup like `{"tpl":"{}"}` takes the
+	 * slower path even though it holds no empty object. That is allowed to cost a wasted
+	 * walk; it is not allowed to change the value, which must stay a string.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::_wp_parse_blocks_preserving_empty_object_attributes
+	 *
+	 * @dataProvider data_empty_object_inside_a_string
+	 *
+	 * @param string $value The string value, as written in the attribute JSON.
+	 */
+	public function test_empty_object_inside_a_string_stays_a_string( $value ) {
+		$markup = '<!-- wp:test {"tpl":"' . $value . '"} /-->';
+		$attrs  = $this->parse_attrs_preserving( $markup );
+
+		$this->assertIsString( $attrs['tpl'] );
+		$this->assertSame( $value, $attrs['tpl'] );
+
+		// And the markup is reproduced byte for byte.
+		$this->assertSame( $markup, serialize_blocks( _wp_parse_blocks_preserving_empty_object_attributes( $markup ) ) );
+	}
+
+	/**
+	 * Data provider.
+	 *
+	 * @return array[]
+	 */
+	public function data_empty_object_inside_a_string() {
+		return array(
+			'no whitespace'     => array( '{}' ),
+			'space'             => array( '{ }' ),
+			'beside other text' => array( 'before {} after' ),
+		);
+	}
+
+	/**
+	 * A real empty object and a string that merely looks like one, in the same attributes.
+	 *
+	 * Proves the two are told apart by the parse itself rather than by the lexical gate,
+	 * which only decides whether to look.
+	 *
+	 * @ticket 63325
+	 *
+	 * @covers ::_wp_parse_blocks_preserving_empty_object_attributes
+	 */
+	public function test_empty_object_and_lookalike_string_are_told_apart() {
+		$attrs = $this->parse_attrs_preserving( '<!-- wp:test {"tpl":"{}","object":{}} /-->' );
+
+		$this->assertSame( '{}', $attrs['tpl'] );
+		$this->assertInstanceOf( 'stdClass', $attrs['object'] );
+	}
+
+	/**
 	 * A populated object still becomes an array, so code that walks attributes with
 	 * array access and array functions keeps working.
 	 *

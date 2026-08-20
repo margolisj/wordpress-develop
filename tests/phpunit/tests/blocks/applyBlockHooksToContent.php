@@ -297,4 +297,65 @@ class Tests_Blocks_ApplyBlockHooksToContent extends WP_UnitTestCase {
 		// The serialized markup still carries the empty object.
 		$this->assertStringContainsString( '"columns":{}', $actual );
 	}
+
+	/**
+	 * A hooked block added purely by filter must still be inserted.
+	 *
+	 * `insert_hooked_blocks()` returns early when no hooked block types remain, which is what
+	 * lets it skip normalizing the anchor block's attributes for the majority of blocks. That
+	 * check has to run after the `hooked_block_types` filter: an anchor with nothing registered
+	 * statically starts with an empty list, and a plugin is entitled to fill it.
+	 *
+	 * @ticket 63325
+	 */
+	public function test_filter_can_add_hooked_block_to_anchor_with_no_registered_hooks() {
+		$anchor_block_type = 'tests/anchor-block-without-registered-hooks';
+
+		// Nothing is hooked to this anchor, so the list is empty until the filter runs.
+		$this->assertSame(
+			array(),
+			get_hooked_blocks()[ $anchor_block_type ] ?? array(),
+			'The anchor block should have no statically registered hooked blocks.'
+		);
+
+		$filter = static function ( $hooked_block_types, $relative_position, $anchor ) use ( $anchor_block_type ) {
+			if ( $anchor_block_type === $anchor && 'after' === $relative_position ) {
+				$hooked_block_types[] = 'tests/hooked-block';
+			}
+
+			return $hooked_block_types;
+		};
+
+		$context          = new WP_Block_Template();
+		$context->content = "<!-- wp:$anchor_block_type /-->";
+
+		add_filter( 'hooked_block_types', $filter, 10, 3 );
+		$actual = apply_block_hooks_to_content( $context->content, $context, 'insert_hooked_blocks' );
+		remove_filter( 'hooked_block_types', $filter, 10 );
+
+		$this->assertSame(
+			"<!-- wp:$anchor_block_type /--><!-- wp:tests/hooked-block /-->",
+			$actual
+		);
+	}
+
+	/**
+	 * An anchor block with no hooked blocks must serialize back unchanged.
+	 *
+	 * Companion to the test above: this is the path that now returns before normalizing the
+	 * anchor block, and a preserved empty object still has to survive it.
+	 *
+	 * @ticket 63325
+	 */
+	public function test_anchor_block_without_hooked_blocks_round_trips() {
+		$content = '<!-- wp:tests/anchor-block-without-registered-hooks {"layout":{"columns":{}}} /-->';
+
+		$context          = new WP_Block_Template();
+		$context->content = $content;
+
+		$this->assertSame(
+			$content,
+			apply_block_hooks_to_content( $content, $context, 'insert_hooked_blocks' )
+		);
+	}
 }
